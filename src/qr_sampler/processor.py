@@ -138,9 +138,10 @@ class _RequestState:
         amplifier: Signal amplifier for this request.
         strategy: Temperature strategy for this request.
         config_hash_str: Short hash for logging.
+        walk_position: Current correlated walk position in [0, 1).
     """
 
-    __slots__ = ("amplifier", "config", "config_hash_str", "strategy")
+    __slots__ = ("amplifier", "config", "config_hash_str", "strategy", "walk_position")
 
     def __init__(
         self,
@@ -148,12 +149,13 @@ class _RequestState:
         amplifier: SignalAmplifier,
         strategy: TemperatureStrategy,
         config_hash_str: str,
+        walk_position: float,
     ) -> None:
         self.config = config
         self.amplifier = amplifier
         self.strategy = strategy
         self.config_hash_str = config_hash_str
-
+        self.walk_position = walk_position
 
 class QRSamplerLogitsProcessor:
     """vLLM V1 LogitsProcessor that replaces token sampling with
@@ -363,6 +365,7 @@ class QRSamplerLogitsProcessor:
                 amplifier=amplifier,
                 strategy=strategy,
                 config_hash_str=hash_str,
+                walk_position=req_config.walk_initial_position,
             )
 
     def apply(self, logits: Any) -> Any:

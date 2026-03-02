@@ -37,6 +37,12 @@ _PER_REQUEST_FIELDS: frozenset[str] = frozenset(
         "top_p",
         "log_level",
         "diagnostic_mode",
+        "logit_noise_alpha",
+        "logit_noise_sigma",
+        "temp_variance_beta",
+        "walk_step",
+        "walk_initial_position",
+        "injection_verbose",
     }
 )
 
@@ -188,6 +194,33 @@ class QRSamplerConfig(BaseSettings):
     top_p: float = Field(
         default=1.0,
         description="Nucleus sampling threshold (1.0 disables)",
+    )
+
+    # --- Injection methods (per-request overridable) ---
+
+    logit_noise_alpha: float = Field(
+        default=0.0,
+        description="M1: Gaussian logit noise magnitude. 0 = disabled.",
+    )
+    logit_noise_sigma: float = Field(
+        default=1.0,
+        description="M1: Standard deviation of Gaussian noise before scaling by alpha.",
+    )
+    temp_variance_beta: float = Field(
+        default=0.0,
+        description="M2: Temperature modulation magnitude. 0 = disabled.",
+    )
+    walk_step: float = Field(
+        default=0.0,
+        description="M3: Correlated walk step size. 0 = disabled.",
+    )
+    walk_initial_position: float = Field(
+        default=0.5,
+        description="M3: Initial walk position in [0, 1).",
+    )
+    injection_verbose: bool = Field(
+        default=False,
+        description="Log injection method activity at each token.",
     )
 
     # --- Logging (per-request overridable) ---
