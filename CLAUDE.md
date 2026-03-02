@@ -47,6 +47,11 @@ src/qr_sampler/
 +-- config.py                      # QRSamplerConfig (pydantic BaseSettings), resolve_config(), validate_extra_args()
 +-- exceptions.py                  # QRSamplerError -> {EntropyUnavailableError, ConfigValidationError, SignalAmplificationError, TokenSelectionError}
 +-- processor.py                   # QRSamplerLogitsProcessor -- vLLM V1 LogitsProcessor, orchestrates everything
++-- injection/
+|   +-- __init__.py                # Re-exports LogitNoise, TempVariance, CorrelatedWalk
+|   +-- logit_noise.py             # M1: Gaussian logit noise (quantum-seeded)
+|   +-- temp_variance.py           # M2: Temperature modulation via quantum entropy
+|   +-- correlated_walk.py         # M3: Per-request correlated walk position
 +-- py.typed                       # PEP 561 marker
 +-- amplification/
 |   +-- __init__.py                # Re-exports
@@ -87,6 +92,11 @@ tests/
 +-- conftest.py                    # Shared fixtures: default_config, sample_logits
 +-- test_config.py                 # Config defaults, env vars, per-request resolution, validation
 +-- test_processor.py              # Integration: full pipeline, batch processing, update_state, one-hot
++-- test_injection/
+|   +-- test_logit_noise.py        # M1: enabled/disabled, reproducibility, scaling, entropy failure
+|   +-- test_temp_variance.py      # M2: enabled/disabled, clamping, range, entropy failure
+|   +-- test_correlated_walk.py    # M3: drift, bounds, no-op, entropy failure
+|   +-- test_integration.py        # Combined: all-methods, backward-compat, per-request-override
 +-- test_statistical_properties.py # KS-test uniformity, bias detection, EDT monotonicity (requires scipy)
 +-- test_amplification/
 |   +-- test_zscore.py             # Known values, SEM derivation, edge cases, frozen immutability
@@ -144,6 +154,11 @@ examples/
 
 12. **Circuit breaker protects gRPC source.** `QuantumGrpcSource` tracks rolling P99 latency (deque, 100 samples), computes adaptive timeout = `max(5ms, P99 * 1.5)`, opens after 3 consecutive failures, enters half-open state after 10s.
 
+13. **Injection methods are stateless utility classes.** `LogitNoise`, `TempVariance`, and
+    `CorrelatedWalk` in `src/qr_sampler/injection/` are stateless -- all state (walk_position)
+    lives in `_RequestState` in `processor.py`. They are NOT registered via the registry
+    pattern and do NOT share an ABC. Each method has a different signature.
+
 ## Coding conventions
 
 - **Python 3.10+** -- use `X | Y` union syntax, not `Union[X, Y]`
@@ -166,14 +181,23 @@ logits (torch.Tensor or numpy, one row per batch request)
   |
   +-> convert to numpy (zero-copy if CPU tensor)
   |
+  +-> [M1] LogitNoise.perturb(logits, entropy_source, config)  [if logit_noise_alpha > 0]
+  |     -> logits with quantum-seeded Gaussian noise added
+  |
   +-> TemperatureStrategy.compute_temperature(logits, config)
   |     -> TemperatureResult { temperature, shannon_entropy, diagnostics }
+  |
+  +-> [M2] TempVariance.modulate(temperature, entropy_source, config)  [if temp_variance_beta > 0]
+  |     -> modulated temperature = temp * (1 + beta * (u - 0.5))
   |
   +-> EntropySource.get_random_bytes(config.sample_count)
   |     -> raw bytes (20,480 by default) -- JUST-IN-TIME
   |
   +-> SignalAmplifier.amplify(raw_bytes)
   |     -> AmplificationResult { u, diagnostics }
+  |
+  +-> [M3] CorrelatedWalk.step(u, entropy_source, config, state.walk_position)  [if walk_step > 0]
+  |     -> (new_u, new_walk_position) -- replaces u for selection
   |
   +-> TokenSelector.select(logits, temperature, top_k, top_p, u)
   |     -> SelectionResult { token_id, token_rank, token_prob, num_candidates }
@@ -261,6 +285,17 @@ All modes use `grpc.aio` (asyncio) on a background thread with sync wrappers via
 3. The env var `QR_{FIELD_NAME_UPPER}` is automatically supported by pydantic-settings
 4. The extra_args key `qr_{field_name}` is automatically supported by `resolve_config()`
 5. Add tests in `tests/test_config.py`
+
+### New injection method
+
+Injection methods are NOT registered via the registry pattern -- they are independent
+utility classes with different signatures. To add a new method:
+
+1. Create a class in `src/qr_sampler/injection/` with a single `@staticmethod`
+2. Add config fields to `QRSamplerConfig` in `config.py` and `_PER_REQUEST_FIELDS`
+3. Add the import and call site to `processor.py` `apply()` at the appropriate pipeline stage
+4. Export from `src/qr_sampler/injection/__init__.py`
+5. Add tests in `tests/test_injection/`
 
 ## Testing approach
 
