@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "grpcio>=1.60.0",
     "protobuf>=4.21.0",
+    "openentropy>=0.10.0",
 ]
 
 [project.urls]
@@ -46,7 +47,6 @@ dev = [
     "pre-commit>=3.0",
     "bandit>=1.7.0",
 ]
-openentropy = ["openentropy"]
 
 [project.entry-points."vllm.logits_processors"]
 qr_sampler = "qr_sampler.processor:QRSamplerLogitsProcessor"
