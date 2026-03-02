@@ -15,6 +15,7 @@ separate instances for different sampling strategies.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,9 @@ from qr_sampler.amplification.registry import AmplifierRegistry
 from qr_sampler.config import QRSamplerConfig, resolve_config, validate_extra_args
 from qr_sampler.entropy.fallback import FallbackEntropySource
 from qr_sampler.entropy.registry import EntropySourceRegistry
+from qr_sampler.injection.correlated_walk import CorrelatedWalk
+from qr_sampler.injection.logit_noise import LogitNoise
+from qr_sampler.injection.temp_variance import TempVariance
 from qr_sampler.logging.logger import SamplingLogger
 from qr_sampler.logging.types import TokenSamplingRecord
 from qr_sampler.selection.selector import TokenSelector
@@ -157,6 +161,7 @@ class _RequestState:
         self.config_hash_str = config_hash_str
         self.walk_position = walk_position
 
+
 class QRSamplerLogitsProcessor:
     """vLLM V1 LogitsProcessor that replaces token sampling with
     external-entropy-driven selection.
@@ -261,7 +266,7 @@ class QRSamplerLogitsProcessor:
             or a numpy array if torch is unavailable.
         """
         try:
-            import torch
+            torch = importlib.import_module("torch")
 
             return torch.full(
                 (self._vocab_size,),
@@ -269,7 +274,7 @@ class QRSamplerLogitsProcessor:
                 device=self._device,
                 dtype=torch.float32,
             )
-        except ImportError:
+        except ModuleNotFoundError:
             return np.full(self._vocab_size, float("-inf"), dtype=np.float32)
 
     def _create_cpu_buffer(self) -> Any:
@@ -282,10 +287,10 @@ class QRSamplerLogitsProcessor:
         if not self._is_pin_memory:
             return None
         try:
-            import torch
+            torch = importlib.import_module("torch")
 
             return torch.empty(self._vocab_size, dtype=torch.float32, pin_memory=True)
-        except ImportError:
+        except ModuleNotFoundError:
             return None
 
     def is_argmax_invariant(self) -> bool:
@@ -422,8 +427,17 @@ class QRSamplerLogitsProcessor:
             else:
                 row = logits[i] if is_numpy else self._to_numpy(logits[i])
 
+            # --- M1: Logit noise injection (before temperature) ---
+            if config.logit_noise_alpha > 0.0:
+                row = LogitNoise.perturb(row, self._entropy_source, config)
+
             # --- 1. Compute temperature ---
             temp_result = strategy.compute_temperature(row, config)
+
+            # --- M2: Temperature variance injection ---
+            temperature = temp_result.temperature
+            if config.temp_variance_beta > 0.0:
+                temperature = TempVariance.modulate(temperature, self._entropy_source, config)
 
             # --- 2. Fetch entropy just-in-time ---
             t_fetch_start = time.perf_counter_ns()
@@ -447,13 +461,23 @@ class QRSamplerLogitsProcessor:
             # --- 3. Amplify to uniform float ---
             amp_result = amplifier.amplify(raw_bytes)
 
+            # --- M3: Correlated walk injection ---
+            u = amp_result.u
+            if config.walk_step > 0.0 and state is not None:
+                u, state.walk_position = CorrelatedWalk.step(
+                    u,
+                    self._entropy_source,
+                    config,
+                    state.walk_position,
+                )
+
             # --- 4. Select token via CDF ---
             selection = self._selector.select(
                 row,
-                temp_result.temperature,
+                temperature,
                 config.top_k,
                 config.top_p,
-                amp_result.u,
+                u,
             )
 
             # --- 5. Force one-hot logits ---
@@ -474,10 +498,10 @@ class QRSamplerLogitsProcessor:
                 entropy_is_fallback=entropy_is_fallback,
                 sample_mean=amp_result.diagnostics.get("sample_mean", 0.0),
                 z_score=amp_result.diagnostics.get("z_score", 0.0),
-                u_value=amp_result.u,
+                u_value=u,
                 temperature_strategy=config.temperature_strategy,
                 shannon_entropy=temp_result.shannon_entropy,
-                temperature_used=temp_result.temperature,
+                temperature_used=temperature,
                 token_id=selection.token_id,
                 token_rank=selection.token_rank,
                 token_prob=selection.token_prob,
