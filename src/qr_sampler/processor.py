@@ -201,6 +201,9 @@ class QRSamplerLogitsProcessor:
         # --- Build shared components ---
         self._entropy_source = _build_entropy_source(self._default_config)
         self._default_amplifier = AmplifierRegistry.build(self._default_config)
+        # Calibrate amplifier if it supports calibration (e.g., ECDF).
+        if hasattr(self._default_amplifier, "calibrate"):
+            self._default_amplifier.calibrate(self._entropy_source, self._default_config)
         self._default_strategy = TemperatureStrategyRegistry.build(
             self._default_config, self._vocab_size
         )
@@ -362,6 +365,9 @@ class QRSamplerLogitsProcessor:
                 hash_str = self._default_config_hash
             else:
                 amplifier = AmplifierRegistry.build(req_config)
+                # Calibrate per-request amplifier if it supports calibration.
+                if hasattr(amplifier, "calibrate"):
+                    amplifier.calibrate(self._entropy_source, req_config)
                 strategy = TemperatureStrategyRegistry.build(req_config, self._vocab_size)
                 hash_str = _config_hash(req_config)
 
@@ -547,8 +553,12 @@ class QRSamplerLogitsProcessor:
             return tensor
         # torch.Tensor — use .numpy() for zero-copy on CPU.
         try:
-            if tensor.is_cuda:
+            # Prefer an explicit CUDA check when available.
+            if bool(getattr(tensor, "is_cuda", False)):
                 result: FloatArray = tensor.detach().cpu().numpy()
+            # Fallback for tensor types exposing is_cpu but not is_cuda.
+            elif hasattr(tensor, "is_cpu") and not bool(tensor.is_cpu):
+                result = tensor.detach().cpu().numpy()
             else:
                 result = tensor.detach().numpy()
             return result
