@@ -200,7 +200,17 @@ class TestResolveConfig:
             if isinstance(default_val, bool):
                 override_val: Any = not default_val
             elif isinstance(default_val, int):
-                override_val = default_val + 1
+                # Respect multiple_of constraints on integer fields.
+                multiple_of = next(
+                    (
+                        getattr(m, "multiple_of", None)
+                        for m in field_info.metadata
+                        if hasattr(m, "multiple_of")
+                    ),
+                    None,
+                )
+                increment = multiple_of if multiple_of is not None else 1
+                override_val = default_val + increment
             elif isinstance(default_val, float):
                 override_val = default_val + 0.1
             elif isinstance(default_val, str):

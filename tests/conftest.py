@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from qr_sampler.config import QRSamplerConfig
+from tests.helpers import SAMPLE_LOGITS
 
 
 @pytest.fixture()
@@ -24,7 +25,7 @@ def sample_logits() -> np.ndarray:
     Shape: (vocab_size=10,) with a clear probability structure:
     token 0 has the highest logit, token 9 the lowest.
     """
-    return np.array([5.0, 4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -3.0, -4.0])
+    return np.array(SAMPLE_LOGITS)
 
 
 @pytest.fixture()

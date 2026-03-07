@@ -1,0 +1,20 @@
+# XTC: Exclude Top Choices with quantum random bits.
+# Each top token's inclusion/exclusion is a binary quantum decision.
+# Designed for consciousness-research: PEAR found strongest effects
+# on binary random processes (~10^-4 bits/bit).
+
+name: xtc_quantum_bits
+description: Exclude top choices using quantum binary decisions
+
+env:
+  QR_ENTROPY_SOURCE_TYPE: system
+  QR_FALLBACK_MODE: system
+  QR_TEMPERATURE_STRATEGY: fixed
+  QR_FIXED_TEMPERATURE: "0.7"
+  QR_XTC_PROBABILITY: "0.5"
+  QR_XTC_THRESHOLD: "0.1"
+
+# Sweep suggestions:
+#   mild:    QR_XTC_PROBABILITY=0.3  QR_XTC_THRESHOLD=0.2
+#   medium:  QR_XTC_PROBABILITY=0.5  QR_XTC_THRESHOLD=0.1
+#   strong:  QR_XTC_PROBABILITY=0.8  QR_XTC_THRESHOLD=0.05

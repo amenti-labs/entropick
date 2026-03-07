@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -15,20 +14,19 @@ if TYPE_CHECKING:
     from qr_sampler.entropy.base import EntropySource
 
 _logger = logging.getLogger("qr_sampler")
-_SQRT2 = math.sqrt(2.0)
 
 
 class LogitNoise:
-    """M1: Gaussian logit noise injection.
+    """M1: Direct per-logit quantum noise injection.
 
-    Adds quantum-seeded Gaussian noise to logits before temperature
-    scaling, reshaping the probability distribution at the earliest
-    pipeline stage.
+    Fetches vocab_size * 4 bytes from the entropy source, maps them to
+    zero-mean unit-variance float32 noise via the probit transform, and
+    adds them to logits before temperature scaling. Every noise dimension
+    is independently quantum-derived -- no PRNG expansion.
 
-    Design note: One quantum-derived seed drives a numpy Generator that
-    produces N Gaussian samples. This 1:N dilution is intentional \u2014
-    correlated noise preserves token relevance better than independent
-    per-logit noise (confirmed by M1 experiments in quantum-llama.cpp).
+    Matches the benchmark spec (Entropy Seeding Benchmark §2.2 Method 1):
+        logits_out = logits + alpha * normalize(
+            entropy_bytes_to_float(source.get_bytes(vocab_size * 4)))
     """
 
     @staticmethod
@@ -36,54 +34,72 @@ class LogitNoise:
         logits: np.ndarray[Any, np.dtype[np.floating[Any]]],
         entropy_source: EntropySource,
         config: QRSamplerConfig,
+        alpha_override: float | None = None,
     ) -> np.ndarray[Any, np.dtype[np.floating[Any]]]:
-        """Perturb logits with quantum-seeded Gaussian noise.
+        """Perturb logits with direct per-logit quantum noise.
+
+        Fetches 4 bytes per logit, interprets them as uint32, maps to
+        uniform floats in (eps, 1-eps), converts to zero-mean unit-variance
+        noise via the probit transform, scales by alpha * sigma, and adds
+        to logits.
 
         Args:
             logits: 1-D float array of raw logit values.
             entropy_source: Source of quantum entropy bytes.
-            config: Sampler configuration (uses logit_noise_alpha, logit_noise_sigma,
-                sample_count, population_mean, population_std, injection_verbose).
+            config: Sampler configuration (uses logit_noise_alpha,
+                logit_noise_sigma, uniform_clamp_epsilon, injection_verbose).
+            alpha_override: If provided, use this instead of config.logit_noise_alpha.
 
         Returns:
             Modified logits array (same shape as input). Returns input unchanged
-            if logit_noise_alpha == 0 or entropy is unavailable.
+            if alpha == 0 or entropy is unavailable.
         """
-        if config.logit_noise_alpha == 0.0:
+        alpha = alpha_override if alpha_override is not None else config.logit_noise_alpha
+        if alpha == 0.0:
             return logits
 
+        n = len(logits)
         try:
-            raw_bytes = entropy_source.get_random_bytes(config.sample_count)
+            raw_bytes = entropy_source.get_random_bytes(n * 4)
         except EntropyUnavailableError:
             _logger.warning("M1 LogitNoise: entropy unavailable, skipping perturbation")
             return logits
 
-        if not raw_bytes:
-            _logger.warning("M1 LogitNoise: empty entropy payload, skipping perturbation")
+        if len(raw_bytes) < n * 4:
+            _logger.warning("M1 LogitNoise: insufficient entropy bytes, skipping perturbation")
             return logits
 
-        # Z-score \u2192 normal CDF \u2192 uniform value (same math as ZScoreMeanAmplifier)
-        samples = np.frombuffer(raw_bytes, dtype=np.uint8)
-        n = len(samples)
-        sample_mean = float(np.mean(samples))
-        sem = config.population_std / math.sqrt(n)
-        z_score = (sample_mean - config.population_mean) / sem
-        u = 0.5 * (1.0 + math.erf(z_score / _SQRT2))
+        # Map raw uint32 bytes -> uniform floats in (eps, 1-eps).
+        uint32s = np.frombuffer(raw_bytes[: n * 4], dtype=np.uint32)
         eps = config.uniform_clamp_epsilon
-        u = max(eps, min(1.0 - eps, u))
+        u = uint32s.astype(np.float64) / (2**32)
+        u = np.clip(u, eps, 1.0 - eps)
 
-        # Seed numpy Generator from quantum-derived u value.
-        # One seed \u2192 N correlated Gaussian samples (intentional 1:N dilution).
-        rng = np.random.default_rng(int(u * 2**32))
-        noise = rng.standard_normal(len(logits)) * config.logit_noise_sigma
-        result = logits + config.logit_noise_alpha * noise
+        # Probit (inverse normal CDF) -> zero-mean unit-variance noise.
+        noise = _probit(u).astype(np.float32) * config.logit_noise_sigma
+        result = logits + alpha * noise
 
         if config.injection_verbose:
             _logger.debug(
-                "M1 LogitNoise: alpha=%.4f sigma=%.4f u=%.6f",
-                config.logit_noise_alpha,
+                "M1 LogitNoise: alpha=%.4f sigma=%.4f n_bytes=%d",
+                alpha,
                 config.logit_noise_sigma,
-                u,
+                len(raw_bytes),
             )
 
         return result
+
+
+def _probit(u: np.ndarray[Any, np.dtype[np.float64]]) -> np.ndarray[Any, np.dtype[np.float64]]:
+    """Vectorised probit (inverse normal CDF) via rational approximation.
+
+    Uses the Beasley-Springer-Moro approximation, accurate to ~1e-9.
+    Input must be in (0, 1) -- clamp before calling.
+    """
+    c0, c1, c2 = 2.515517, 0.802853, 0.010328
+    d1, d2, d3 = 1.432788, 0.189269, 0.001308
+
+    p = np.where(u < 0.5, u, 1.0 - u)
+    t = np.sqrt(-2.0 * np.log(p))
+    x = t - (c0 + c1 * t + c2 * t**2) / (1.0 + d1 * t + d2 * t**2 + d3 * t**3)
+    return np.where(u < 0.5, -x, x)

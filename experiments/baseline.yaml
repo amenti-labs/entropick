@@ -1,0 +1,18 @@
+# Baseline experiment: no injection methods active.
+# Standard CDF selection with fixed temperature.
+#
+# Use as a control for comparing injection methods.
+
+name: baseline
+description: Standard sampling with no entropy injection
+
+env:
+  QR_ENTROPY_SOURCE_TYPE: system
+  QR_FALLBACK_MODE: system
+  QR_TEMPERATURE_STRATEGY: fixed
+  QR_FIXED_TEMPERATURE: "0.7"
+  QR_TOP_K: "50"
+  QR_TOP_P: "0.95"
+
+# Default pipeline (all stages present, injection stages no-op):
+#   logit_noise -> temperature -> temp_variance -> entropy_fetch -> correlated_walk -> selection

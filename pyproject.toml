@@ -28,7 +28,6 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "grpcio>=1.60.0",
     "protobuf>=4.21.0",
-    "openentropy>=0.10.0",
 ]
 
 [project.urls]
@@ -38,6 +37,9 @@ Issues = "https://github.com/qr-sampler/qr-sampler/issues"
 Changelog = "https://github.com/qr-sampler/qr-sampler/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+openentropy = [
+    "openentropy>=0.10.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -57,6 +59,17 @@ quantum_grpc = "qr_sampler.entropy.quantum:QuantumGrpcSource"
 timing_noise = "qr_sampler.entropy.timing:TimingNoiseSource"
 mock_uniform = "qr_sampler.entropy.mock:MockUniformSource"
 openentropy = "qr_sampler.entropy.openentropy:OpenEntropySource"
+
+[project.entry-points."qr_sampler.pipeline_stages"]
+adaptive_injection = "qr_sampler.stages.adaptive_injection:AdaptiveInjectionStage"
+logit_noise = "qr_sampler.stages.logit_noise:LogitNoiseStage"
+temperature = "qr_sampler.stages.temperature:TemperatureStage"
+temp_variance = "qr_sampler.stages.temp_variance:TempVarianceStage"
+min_p = "qr_sampler.stages.min_p:MinPStage"
+xtc = "qr_sampler.stages.xtc:XTCStage"
+entropy_fetch = "qr_sampler.stages.entropy_fetch:EntropyFetchStage"
+correlated_walk = "qr_sampler.stages.correlated_walk:CorrelatedWalkStage"
+selection = "qr_sampler.stages.selection:SelectionStage"
 
 [tool.setuptools.packages.find]
 where = ["src"]

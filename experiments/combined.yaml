@@ -1,0 +1,23 @@
+# Combined experiment: all three injection methods active.
+# M1 (logit noise) + M2 (temp variance) + M3 (correlated walk)
+#
+# Use mild settings for each to study their interaction.
+
+name: combined_m1_m2_m3
+description: All injection methods active with mild settings
+
+env:
+  QR_ENTROPY_SOURCE_TYPE: system
+  QR_FALLBACK_MODE: system
+  QR_TEMPERATURE_STRATEGY: fixed
+  QR_FIXED_TEMPERATURE: "0.7"
+  QR_TOP_K: "50"
+  QR_TOP_P: "0.95"
+  # M1: Logit noise
+  QR_LOGIT_NOISE_ALPHA: "0.1"
+  QR_LOGIT_NOISE_SIGMA: "1.0"
+  # M2: Temperature variance
+  QR_TEMP_VARIANCE_BETA: "0.2"
+  # M3: Correlated walk
+  QR_WALK_STEP: "0.05"
+  QR_WALK_INITIAL_POSITION: "0.5"

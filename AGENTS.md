@@ -1,4 +1,4 @@
-# CLAUDE.md -- Codebase Guide for Coding Agents
+# AGENTS.md -- Codebase Guide for Coding Agents
 
 ## What this project is
 
@@ -20,7 +20,6 @@ pytest tests/test_selection/ -v
 pytest tests/test_logging/ -v
 pytest tests/test_entropy/ -v
 pytest tests/test_processor.py -v
-pytest tests/test_pipeline/ -v
 pytest tests/test_statistical_properties.py -v
 
 # Run with coverage
@@ -47,31 +46,13 @@ src/qr_sampler/
 +-- __init__.py                    # Package version (setuptools-scm), re-exports
 +-- config.py                      # QRSamplerConfig (pydantic BaseSettings), resolve_config(), validate_extra_args()
 +-- exceptions.py                  # QRSamplerError -> {EntropyUnavailableError, ConfigValidationError, SignalAmplificationError, TokenSelectionError}
-+-- processor.py                   # QRSamplerLogitsProcessor -- thin adapter, builds SamplingContext and runs pipeline
-+-- py.typed                       # PEP 561 marker
-+-- pipeline/
-|   +-- __init__.py                # Re-exports PipelineStage, SamplingContext, StageRegistry
-|   +-- stage.py                   # PipelineStage protocol (runtime_checkable): name + __call__(ctx)
-|   +-- context.py                 # SamplingContext mutable dataclass -- state bag passed through all stages
-|   +-- registry.py                # StageRegistry: @register() decorator + entry-point auto-discovery
-+-- stages/
-|   +-- __init__.py                # Exports all 9 stage classes + build_default_pipeline()
-|   +-- _utils.py                  # Shared stable_softmax(), shannon_entropy_from_probs()
-|   +-- adaptive_injection.py      # AdaptiveInjectionStage: entropy-based injection scaling
-|   +-- logit_noise.py             # LogitNoiseStage: M1 per-logit quantum noise
-|   +-- temperature.py             # TemperatureStage: compute temperature via strategy
-|   +-- temp_variance.py           # TempVarianceStage: M2 quantum temperature modulation
-|   +-- min_p.py                   # MinPStage: dynamic probability floor filtering
-|   +-- xtc.py                     # XTCStage: quantum-driven top-token exclusion
-|   +-- entropy_fetch.py           # EntropyFetchStage: JIT entropy fetch + signal amplification
-|   +-- correlated_walk.py         # CorrelatedWalkStage: M3 per-request correlated walk
-|   +-- selection.py               # SelectionStage: CDF-based token selection
++-- processor.py                   # QRSamplerLogitsProcessor -- vLLM V1 LogitsProcessor, orchestrates everything
 +-- injection/
 |   +-- __init__.py                # Re-exports LogitNoise, TempVariance, CorrelatedWalk
-|   +-- _entropy_utils.py          # Shared bytes_to_uniform() helper (z-score -> CDF -> uniform)
 |   +-- logit_noise.py             # M1: Gaussian logit noise (quantum-seeded)
 |   +-- temp_variance.py           # M2: Temperature modulation via quantum entropy
 |   +-- correlated_walk.py         # M3: Per-request correlated walk position
++-- py.typed                       # PEP 561 marker
 +-- amplification/
 |   +-- __init__.py                # Re-exports
 |   +-- base.py                    # SignalAmplifier ABC, AmplificationResult frozen dataclass
@@ -108,13 +89,9 @@ src/qr_sampler/
 
 tests/
 +-- __init__.py
-+-- conftest.py                    # Shared fixtures: default_config, sample_logits, batch_logits
-+-- helpers.py                     # Shared mock objects (MockVllmConfig, etc.) and test utilities
++-- conftest.py                    # Shared fixtures: default_config, sample_logits
 +-- test_config.py                 # Config defaults, env vars, per-request resolution, validation
 +-- test_processor.py              # Integration: full pipeline, batch processing, update_state, one-hot
-+-- test_pipeline/
-|   +-- test_stages.py             # Protocol compliance, registry, default pipeline, custom pipelines, stage_state
-|   +-- test_new_stages.py         # Min-P, XTC, adaptive injection stage tests
 +-- test_injection/
 |   +-- test_logit_noise.py        # M1: enabled/disabled, reproducibility, scaling, entropy failure
 |   +-- test_temp_variance.py      # M2: enabled/disabled, clamping, range, entropy failure
@@ -137,13 +114,6 @@ tests/
 +-- test_temperature/
     +-- test_fixed.py              # Constant output, Shannon entropy computation
     +-- test_edt.py                # Monotonicity, clamping, exponent effects
-
-experiments/                       # YAML experiment presets with env var overrides
-+-- baseline.yaml                  # No injection methods (control)
-+-- m1_logit_noise.yaml            # M1 only: per-logit quantum noise
-+-- m2_temp_variance.yaml          # M2 only: quantum temperature modulation
-+-- m3_correlated_walk.yaml        # M3 only: correlated walk
-+-- combined.yaml                  # All three injection methods active
 
 examples/
 +-- servers/
@@ -184,19 +154,10 @@ examples/
 
 12. **Circuit breaker protects gRPC source.** `QuantumGrpcSource` tracks rolling P99 latency (deque, 100 samples), computes adaptive timeout = `max(5ms, P99 * 1.5)`, opens after 3 consecutive failures, enters half-open state after 10s.
 
-13. **Pipeline-as-stages architecture.** The sampling pipeline is a list of `PipelineStage`
-    instances. Each stage satisfies a `@runtime_checkable` protocol with `name: str` and
-    `__call__(self, ctx: SamplingContext) -> None`. Stages are registered via
-    `@StageRegistry.register("name")` and discoverable via the `qr_sampler.pipeline_stages`
-    entry-point group. The processor never calls injection methods directly -- it iterates
-    `for stage in self._pipeline: stage(ctx)`. The underlying injection utilities in
-    `src/qr_sampler/injection/` remain stateless; all state lives in `SamplingContext.stage_state`
-    (a `dict[str, Any]` that persists across `apply()` calls via `_RequestState`).
-
-14. **`_RequestState` uses `stage_state` dict.** Per-request persistent state (e.g., correlated
-    walk position) is stored in `stage_state: dict[str, Any]`, keyed by convention as
-    `"stage_name.field"` (e.g., `"correlated_walk.position"`). The `walk_position` property on
-    `_RequestState` is a backward-compat accessor that reads/writes `stage_state`.
+13. **Injection methods are stateless utility classes.** `LogitNoise`, `TempVariance`, and
+    `CorrelatedWalk` in `src/qr_sampler/injection/` are stateless -- all state (walk_position)
+    lives in `_RequestState` in `processor.py`. They are NOT registered via the registry
+    pattern and do NOT share an ABC. Each method has a different signature.
 
 ## Coding conventions
 
@@ -213,33 +174,38 @@ examples/
 
 ## Key data flows
 
-### Per-token sampling pipeline (in `processor.py` `_apply_row()`)
+### Per-token sampling pipeline (in `processor.py` `apply()`)
 
 ```
 logits (torch.Tensor or numpy, one row per batch request)
   |
   +-> convert to numpy (zero-copy if CPU tensor)
   |
-  +-> Build SamplingContext(row, config, entropy_source, amplifier, strategy, stage_state)
+  +-> [M1] LogitNoise.perturb(logits, entropy_source, config)  [if logit_noise_alpha > 0]
+  |     -> logits with quantum-seeded Gaussian noise added
   |
-  +-> for stage in pipeline:  stage(ctx)
-  |     1. LogitNoiseStage     -- [M1] add quantum-seeded Gaussian noise to logits
-  |     2. TemperatureStage    -- compute temperature + Shannon entropy via strategy
-  |     3. TempVarianceStage   -- [M2] modulate temperature: temp * (1 + beta * (u - 0.5))
-  |     4. EntropyFetchStage   -- JIT entropy fetch + amplification -> ctx.u
-  |     5. CorrelatedWalkStage -- [M3] walk-based u replacement via stage_state
-  |     6. SelectionStage      -- CDF-based token selection -> ctx.token_id
+  +-> TemperatureStrategy.compute_temperature(logits, config)
+  |     -> TemperatureResult { temperature, shannon_entropy, diagnostics }
   |
-  +-> Persist ctx.stage_state back to _RequestState
+  +-> [M2] TempVariance.modulate(temperature, entropy_source, config)  [if temp_variance_beta > 0]
+  |     -> modulated temperature = temp * (1 + beta * (u - 0.5))
+  |
+  +-> EntropySource.get_random_bytes(config.sample_count)
+  |     -> raw bytes (20,480 by default) -- JUST-IN-TIME
+  |
+  +-> SignalAmplifier.amplify(raw_bytes)
+  |     -> AmplificationResult { u, diagnostics }
+  |
+  +-> [M3] CorrelatedWalk.step(u, entropy_source, config, state.walk_position)  [if walk_step > 0]
+  |     -> (new_u, new_walk_position) -- replaces u for selection
+  |
+  +-> TokenSelector.select(logits, temperature, top_k, top_p, u)
+  |     -> SelectionResult { token_id, token_rank, token_prob, num_candidates }
   |
   +-> Force one-hot logits: row = -inf everywhere, 0.0 at token_id
   |
   +-> SamplingLogger.log_token(TokenSamplingRecord)
 ```
-
-Each stage reads/writes `SamplingContext` fields. Stages no-op when their config
-parameter is disabled (e.g., `logit_noise_alpha <= 0`). The pipeline is a plain
-`list[PipelineStage]` -- users can reorder, add, or remove stages.
 
 ### Config resolution flow
 
@@ -320,24 +286,21 @@ All modes use `grpc.aio` (asyncio) on a background thread with sync wrappers via
 4. The extra_args key `qr_{field_name}` is automatically supported by `resolve_config()`
 5. Add tests in `tests/test_config.py`
 
-### New pipeline stage
+### New injection method
 
-1. Create a class in `src/qr_sampler/stages/` with `name: str` attribute and `__call__(self, ctx: SamplingContext) -> None`
-2. Register: `@StageRegistry.register("my_name")` (from `pipeline.registry`)
-3. Stages read/write `SamplingContext` fields -- check `pipeline/context.py` for available fields
-4. For persistent per-request state, use `ctx.stage_state["my_stage.field_name"]`
-5. Add config fields to `QRSamplerConfig` if needed (and to `_PER_REQUEST_FIELDS` if per-request overridable)
-6. Add entry point in `pyproject.toml` under `[project.entry-points."qr_sampler.pipeline_stages"]`
-7. Export from `src/qr_sampler/stages/__init__.py`
-8. Add tests in `tests/test_pipeline/` or `tests/test_injection/`
-9. To include in the default pipeline, add to `build_default_pipeline()` in `stages/__init__.py`
+Injection methods are NOT registered via the registry pattern -- they are independent
+utility classes with different signatures. To add a new method:
+
+1. Create a class in `src/qr_sampler/injection/` with a single `@staticmethod`
+2. Add config fields to `QRSamplerConfig` in `config.py` and `_PER_REQUEST_FIELDS`
+3. Add the import and call site to `processor.py` `apply()` at the appropriate pipeline stage
+4. Export from `src/qr_sampler/injection/__init__.py`
+5. Add tests in `tests/test_injection/`
 
 ## Testing approach
 
 - **No real QRNG server or GPU needed.** Tests use `MockUniformSource` and numpy arrays (processor handles both torch tensors and numpy).
 - **Dependency injection everywhere.** The processor accepts `vllm_config=None` for testing.
-- **Shared test utilities** live in `tests/helpers.py` (not conftest -- it can't be imported as a module from subdirectories). Provides `make_processor()`, `assert_onehot()`, `register_request()`, mock objects (`MockVllmConfig`, `MockSamplingParams`, etc.), and constants (`SAMPLE_LOGITS`, `VOCAB_SIZE`).
-- **Pipeline tests** in `tests/test_pipeline/` verify protocol compliance, registry, default pipeline, custom pipelines, and stage_state persistence.
 - **Statistical tests** in `test_statistical_properties.py` require `scipy` (dev dependency). They validate mathematical properties: KS-test for u-value uniformity, bias detection, EDT monotonicity.
 - **Frozen dataclass tests** verify immutability of all result types.
 - **Edge case coverage** is thorough: empty inputs, single-token vocab, all-identical logits, all-inf-except-one logits, zero temperature.

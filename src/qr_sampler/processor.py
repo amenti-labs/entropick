@@ -1,7 +1,7 @@
-"""vLLM V1 LogitsProcessor — the integration layer for qr-sampler.
+"""vLLM V1 LogitsProcessor -- the integration layer for qr-sampler.
 
-Orchestrates the full per-token sampling pipeline:
-    logits → temperature → entropy fetch → amplification → CDF selection → one-hot.
+Thin adapter that builds a ``SamplingContext`` for each batch row and
+runs it through the configurable pipeline of ``PipelineStage`` instances.
 
 Registered via entry point::
 
@@ -26,17 +26,16 @@ from qr_sampler.amplification.registry import AmplifierRegistry
 from qr_sampler.config import QRSamplerConfig, resolve_config, validate_extra_args
 from qr_sampler.entropy.fallback import FallbackEntropySource
 from qr_sampler.entropy.registry import EntropySourceRegistry
-from qr_sampler.injection.correlated_walk import CorrelatedWalk
-from qr_sampler.injection.logit_noise import LogitNoise
-from qr_sampler.injection.temp_variance import TempVariance
 from qr_sampler.logging.logger import SamplingLogger
 from qr_sampler.logging.types import TokenSamplingRecord
-from qr_sampler.selection.selector import TokenSelector
+from qr_sampler.pipeline.context import SamplingContext
+from qr_sampler.stages import build_default_pipeline
 from qr_sampler.temperature.registry import TemperatureStrategyRegistry
 
 if TYPE_CHECKING:
     from qr_sampler.amplification.base import SignalAmplifier
     from qr_sampler.entropy.base import EntropySource
+    from qr_sampler.pipeline.stage import PipelineStage
     from qr_sampler.temperature.base import FloatArray, TemperatureStrategy
 
 logger = logging.getLogger("qr_sampler")
@@ -78,7 +77,6 @@ def _accepts_config(cls: type) -> bool:
         return False
 
     params = list(sig.parameters.values())
-    # inspect.signature(cls) already strips 'self' for classes.
     for param in params:
         annotation = param.annotation
         if annotation is inspect.Parameter.empty:
@@ -104,7 +102,6 @@ def _build_entropy_source(config: QRSamplerConfig) -> EntropySource:
     """
     source_cls = EntropySourceRegistry.get(config.entropy_source_type)
 
-    # Only pass config if the constructor expects it.
     if _accepts_config(source_cls):
         primary: EntropySource = source_cls(config)  # type: ignore[call-arg]
     else:
@@ -113,7 +110,6 @@ def _build_entropy_source(config: QRSamplerConfig) -> EntropySource:
     if config.fallback_mode == "error":
         return primary
 
-    # Build fallback source.
     if config.fallback_mode == "system":
         from qr_sampler.entropy.system import SystemEntropySource
 
@@ -142,10 +138,10 @@ class _RequestState:
         amplifier: Signal amplifier for this request.
         strategy: Temperature strategy for this request.
         config_hash_str: Short hash for logging.
-        walk_position: Current correlated walk position in [0, 1).
+        stage_state: Persistent state dict for pipeline stages.
     """
 
-    __slots__ = ("amplifier", "config", "config_hash_str", "strategy", "walk_position")
+    __slots__ = ("amplifier", "config", "config_hash_str", "stage_state", "strategy")
 
     def __init__(
         self,
@@ -153,23 +149,31 @@ class _RequestState:
         amplifier: SignalAmplifier,
         strategy: TemperatureStrategy,
         config_hash_str: str,
-        walk_position: float,
+        stage_state: dict[str, Any],
     ) -> None:
         self.config = config
         self.amplifier = amplifier
         self.strategy = strategy
         self.config_hash_str = config_hash_str
-        self.walk_position = walk_position
+        self.stage_state = stage_state
+
+    @property
+    def walk_position(self) -> float:
+        """Convenience accessor for correlated walk position."""
+        return float(self.stage_state.get("correlated_walk.position", 0.5))
+
+    @walk_position.setter
+    def walk_position(self, value: float) -> None:
+        self.stage_state["correlated_walk.position"] = value
 
 
 class QRSamplerLogitsProcessor:
     """vLLM V1 LogitsProcessor that replaces token sampling with
     external-entropy-driven selection.
 
-    The processor fetches entropy just-in-time for each token, amplifies
-    it into a uniform float via z-score statistics, and uses that float
-    to select a token from a probability-ordered CDF. The selected token
-    is forced via a one-hot logit vector.
+    The processor builds a ``SamplingContext`` for each batch row and
+    runs it through a configurable pipeline of ``PipelineStage`` instances.
+    The selected token is forced via a one-hot logit vector.
 
     Constructor signature matches vLLM V1's ``LogitsProcessor`` ABC::
 
@@ -181,14 +185,17 @@ class QRSamplerLogitsProcessor:
         vllm_config: Any = None,
         device: Any = None,
         is_pin_memory: bool = False,
+        pipeline: list[PipelineStage] | None = None,
     ) -> None:
         """Initialize the processor and all subsystems.
 
         Args:
             vllm_config: vLLM's ``VllmConfig`` object (provides vocab_size).
-                ``None`` in test environments — uses ``_DEFAULT_VOCAB_SIZE``.
+                ``None`` in test environments -- uses ``_DEFAULT_VOCAB_SIZE``.
             device: ``torch.device`` for tensor operations. ``None`` in tests.
             is_pin_memory: Whether to use pinned CPU memory for transfers.
+            pipeline: Custom pipeline stages. If ``None``, uses the default
+                pipeline (all built-in stages).
         """
         # --- Extract vocab_size ---
         self._vocab_size = self._extract_vocab_size(vllm_config)
@@ -201,13 +208,11 @@ class QRSamplerLogitsProcessor:
         # --- Build shared components ---
         self._entropy_source = _build_entropy_source(self._default_config)
         self._default_amplifier = AmplifierRegistry.build(self._default_config)
-        # Calibrate amplifier if it supports calibration (e.g., ECDF).
         if hasattr(self._default_amplifier, "calibrate"):
             self._default_amplifier.calibrate(self._entropy_source, self._default_config)
         self._default_strategy = TemperatureStrategyRegistry.build(
             self._default_config, self._vocab_size
         )
-        self._selector = TokenSelector()
         self._logger = SamplingLogger(self._default_config)
 
         # --- Pre-compute default state ---
@@ -217,17 +222,23 @@ class QRSamplerLogitsProcessor:
         self._onehot_template = self._create_onehot_template()
         self._cpu_buffer = self._create_cpu_buffer()
 
+        # --- Pipeline ---
+        self._pipeline: list[PipelineStage] = (
+            pipeline if pipeline is not None else build_default_pipeline()
+        )
+
         # --- Per-request state ---
-        # Maps request index (batch position) to its state.
         self._request_states: dict[int, _RequestState] = {}
 
         logger.info(
             "QRSamplerLogitsProcessor initialized: vocab_size=%d, "
-            "entropy_source=%s, amplifier=%s, temperature=%s",
+            "entropy_source=%s, amplifier=%s, temperature=%s, "
+            "pipeline=[%s]",
             self._vocab_size,
             self._entropy_source.name,
             self._default_config.signal_amplifier_type,
             self._default_config.temperature_strategy,
+            ", ".join(s.name for s in self._pipeline),
         )
 
     @staticmethod
@@ -243,13 +254,11 @@ class QRSamplerLogitsProcessor:
         if vllm_config is None:
             return _DEFAULT_VOCAB_SIZE
 
-        # vLLM V1: vllm_config.model_config.hf_text_config.vocab_size
         try:
             return int(vllm_config.model_config.hf_text_config.vocab_size)
         except AttributeError:
             pass
 
-        # Try direct vocab_size attribute.
         try:
             return int(vllm_config.vocab_size)
         except AttributeError:
@@ -262,15 +271,9 @@ class QRSamplerLogitsProcessor:
         return _DEFAULT_VOCAB_SIZE
 
     def _create_onehot_template(self) -> Any:
-        """Create the one-hot template tensor filled with -inf.
-
-        Returns:
-            A tensor of shape ``(vocab_size,)`` filled with ``-inf``,
-            or a numpy array if torch is unavailable.
-        """
+        """Create the one-hot template tensor filled with -inf."""
         try:
             torch = importlib.import_module("torch")
-
             return torch.full(
                 (self._vocab_size,),
                 float("-inf"),
@@ -281,27 +284,17 @@ class QRSamplerLogitsProcessor:
             return np.full(self._vocab_size, float("-inf"), dtype=np.float32)
 
     def _create_cpu_buffer(self) -> Any:
-        """Create a pinned-memory CPU buffer for transfers.
-
-        Returns:
-            A pinned tensor if ``is_pin_memory`` is True and torch is available,
-            otherwise ``None``.
-        """
+        """Create a pinned-memory CPU buffer for transfers."""
         if not self._is_pin_memory:
             return None
         try:
             torch = importlib.import_module("torch")
-
             return torch.empty(self._vocab_size, dtype=torch.float32, pin_memory=True)
         except (ImportError, OSError):
             return None
 
     def is_argmax_invariant(self) -> bool:
-        """Return ``False`` — this processor fundamentally changes token selection.
-
-        This ensures the processor runs before penalties and temperature scaling
-        in the vLLM pipeline, operating on raw logits.
-        """
+        """Return ``False`` -- this processor fundamentally changes token selection."""
         return False
 
     @classmethod
@@ -325,7 +318,7 @@ class QRSamplerLogitsProcessor:
         """Process batch composition changes.
 
         Must be called every engine step before ``apply()``. Processes
-        changes in the required order: removed → moved → added.
+        changes in the required order: removed -> moved -> added.
 
         Args:
             batch_update: A ``BatchUpdate`` with ``removed``, ``moved``,
@@ -354,46 +347,40 @@ class QRSamplerLogitsProcessor:
                 continue
 
             extra_args = getattr(getattr(added, "sampling_params", None), "extra_args", None) or {}
-
-            # Resolve per-request config.
             req_config = resolve_config(self._default_config, extra_args)
 
-            # Build per-request components if config differs from default.
             if req_config is self._default_config:
                 amplifier = self._default_amplifier
                 strategy = self._default_strategy
                 hash_str = self._default_config_hash
             else:
                 amplifier = AmplifierRegistry.build(req_config)
-                # Calibrate per-request amplifier if it supports calibration.
                 if hasattr(amplifier, "calibrate"):
                     amplifier.calibrate(self._entropy_source, req_config)
                 strategy = TemperatureStrategyRegistry.build(req_config, self._vocab_size)
                 hash_str = _config_hash(req_config)
+
+            # Initialize persistent stage state.
+            stage_state: dict[str, Any] = {
+                "correlated_walk.position": req_config.walk_initial_position,
+            }
 
             self._request_states[req_idx] = _RequestState(
                 config=req_config,
                 amplifier=amplifier,
                 strategy=strategy,
                 config_hash_str=hash_str,
-                walk_position=req_config.walk_initial_position,
+                stage_state=stage_state,
             )
 
     def apply(self, logits: Any) -> Any:
-        """Run the full sampling pipeline on each row of the logit tensor.
+        """Run the pipeline on each row of the logit tensor.
 
         For each request in the batch:
-            1. Resolve per-request config
-            2. Convert logit row to numpy
-            3. Optionally apply M1 logit noise (extra entropy fetch)
-            4. Compute temperature
-            5. Optionally apply M2 temp variance (extra entropy fetch)
-            6. Fetch entropy just-in-time
-            7. Amplify to uniform float
-            8. Optionally apply M3 correlated walk (extra entropy fetch)
-            9. Select token via CDF
-            10. Force one-hot logits
-            11. Log sampling record
+            1. Build a ``SamplingContext`` from per-request state
+            2. Run all pipeline stages
+            3. Force one-hot logits
+            4. Log sampling record
 
         Args:
             logits: 2-D tensor of shape ``(num_requests, vocab_size)``.
@@ -402,7 +389,6 @@ class QRSamplerLogitsProcessor:
         Returns:
             The modified logits tensor (in-place).
         """
-        # Determine batch size.
         if hasattr(logits, "shape"):
             num_requests = logits.shape[0] if len(logits.shape) > 1 else 1
         else:
@@ -415,148 +401,99 @@ class QRSamplerLogitsProcessor:
         is_1d = len(logits.shape) == 1
 
         for i in range(num_requests):
-            t_start_ns = time.perf_counter_ns()
-            injection_entropy_ms = 0.0
-
-            # Get per-request state or fall back to defaults.
-            state = self._request_states.get(i)
-            if state is not None:
-                config = state.config
-                amplifier = state.amplifier
-                strategy = state.strategy
-                hash_str = state.config_hash_str
-            else:
-                config = self._default_config
-                amplifier = self._default_amplifier
-                strategy = self._default_strategy
-                hash_str = self._default_config_hash
-
-            # --- Extract row as numpy ---
-            if is_1d:
-                row = logits if is_numpy else self._to_numpy(logits)
-            else:
-                row = logits[i] if is_numpy else self._to_numpy(logits[i])
-
-            # --- M1: Logit noise injection (before temperature) ---
-            if config.logit_noise_alpha > 0.0:
-                t_m1_start = time.perf_counter_ns()
-                row = LogitNoise.perturb(row, self._entropy_source, config)
-                t_m1_end = time.perf_counter_ns()
-                injection_entropy_ms += (t_m1_end - t_m1_start) / 1_000_000.0
-
-            # --- 1. Compute temperature ---
-            temp_result = strategy.compute_temperature(row, config)
-
-            # --- M2: Temperature variance injection ---
-            temperature = temp_result.temperature
-            if config.temp_variance_beta > 0.0:
-                t_m2_start = time.perf_counter_ns()
-                temperature = TempVariance.modulate(temperature, self._entropy_source, config)
-                t_m2_end = time.perf_counter_ns()
-                injection_entropy_ms += (t_m2_end - t_m2_start) / 1_000_000.0
-
-            # --- 2. Fetch entropy just-in-time ---
-            t_fetch_start = time.perf_counter_ns()
-            entropy_is_fallback = False
-            entropy_source_name = self._entropy_source.name
-
-            raw_bytes = self._entropy_source.get_random_bytes(config.sample_count)
-
-            # Detect if fallback was used.
-            if isinstance(self._entropy_source, FallbackEntropySource):
-                entropy_source_name = self._entropy_source.last_source_used
-                # If the primary source name is a compound name, the last source
-                # used will be the fallback's name when it was triggered.
-                entropy_is_fallback = (
-                    self._entropy_source.last_source_used != self._entropy_source._primary.name
-                )
-
-            t_fetch_end = time.perf_counter_ns()
-            entropy_fetch_ms = (t_fetch_end - t_fetch_start) / 1_000_000.0 + injection_entropy_ms
-
-            # --- 3. Amplify to uniform float ---
-            amp_result = amplifier.amplify(raw_bytes)
-
-            # --- M3: Correlated walk injection ---
-            u = amp_result.u
-            m3_active = False
-            if config.walk_step > 0.0 and state is not None:
-                m3_active = True
-                t_m3_start = time.perf_counter_ns()
-                u, state.walk_position = CorrelatedWalk.step(
-                    u,
-                    self._entropy_source,
-                    config,
-                    state.walk_position,
-                )
-                t_m3_end = time.perf_counter_ns()
-                entropy_fetch_ms += (t_m3_end - t_m3_start) / 1_000_000.0
-
-            # --- 4. Select token via CDF ---
-            selection = self._selector.select(
-                row,
-                temperature,
-                config.top_k,
-                config.top_p,
-                u,
-            )
-
-            # --- 5. Force one-hot logits ---
-            if is_1d:
-                self._force_onehot(logits, selection.token_id, is_numpy)
-            else:
-                self._force_onehot_row(logits, i, selection.token_id, is_numpy)
-
-            # --- 6. Log sampling record ---
-            t_end_ns = time.perf_counter_ns()
-            total_sampling_ms = (t_end_ns - t_start_ns) / 1_000_000.0
-
-            sample_mean = amp_result.diagnostics.get("sample_mean", 0.0)
-            z_score = amp_result.diagnostics.get("z_score", 0.0)
-            if m3_active:
-                sample_mean = float("nan")
-                z_score = float("nan")
-
-            record = TokenSamplingRecord(
-                timestamp_ns=t_start_ns,
-                entropy_fetch_ms=entropy_fetch_ms,
-                total_sampling_ms=total_sampling_ms,
-                entropy_source_used=entropy_source_name,
-                entropy_is_fallback=entropy_is_fallback,
-                sample_mean=sample_mean,
-                z_score=z_score,
-                u_value=u,
-                temperature_strategy=config.temperature_strategy,
-                shannon_entropy=temp_result.shannon_entropy,
-                temperature_used=temperature,
-                token_id=selection.token_id,
-                token_rank=selection.token_rank,
-                token_prob=selection.token_prob,
-                num_candidates=selection.num_candidates,
-                config_hash=hash_str,
-            )
-            self._logger.log_token(record)
+            self._apply_row(logits, i, is_numpy, is_1d)
 
         return logits
 
-    @staticmethod
-    def _to_numpy(tensor: Any) -> FloatArray:
-        """Convert a tensor to a numpy array with zero-copy where possible.
+    def _apply_row(self, logits: Any, i: int, is_numpy: bool, is_1d: bool) -> None:
+        """Process a single row through the pipeline.
 
         Args:
-            tensor: A torch.Tensor or numpy array.
-
-        Returns:
-            Numpy array view (if CPU tensor) or copy.
+            logits: Full logit tensor (modified in-place).
+            i: Row index in the batch.
+            is_numpy: Whether logits is a numpy array.
+            is_1d: Whether logits is 1-D (single request, no batch dim).
         """
+        t_start_ns = time.perf_counter_ns()
+
+        # --- Resolve per-request state ---
+        state = self._request_states.get(i)
+        if state is not None:
+            config = state.config
+            amplifier = state.amplifier
+            strategy = state.strategy
+            hash_str = state.config_hash_str
+            stage_state = state.stage_state
+        else:
+            config = self._default_config
+            amplifier = self._default_amplifier
+            strategy = self._default_strategy
+            hash_str = self._default_config_hash
+            stage_state = {}
+
+        # --- Extract row as numpy ---
+        if is_1d:
+            row = logits if is_numpy else self._to_numpy(logits)
+        else:
+            row = logits[i] if is_numpy else self._to_numpy(logits[i])
+
+        # --- Build context ---
+        ctx = SamplingContext(
+            row=row,
+            config=config,
+            entropy_source=self._entropy_source,
+            amplifier=amplifier,
+            temperature_strategy=strategy,
+            config_hash=hash_str,
+            stage_state=stage_state,
+        )
+
+        # --- Run pipeline ---
+        for stage in self._pipeline:
+            stage(ctx)
+
+        # --- Persist stage state back to request state ---
+        if state is not None:
+            state.stage_state = ctx.stage_state
+
+        # --- Force one-hot logits ---
+        if is_1d:
+            self._force_onehot(logits, ctx.token_id, is_numpy)
+        else:
+            self._force_onehot_row(logits, i, ctx.token_id, is_numpy)
+
+        # --- Log sampling record ---
+        t_end_ns = time.perf_counter_ns()
+        total_sampling_ms = (t_end_ns - t_start_ns) / 1_000_000.0
+
+        record = TokenSamplingRecord(
+            timestamp_ns=t_start_ns,
+            entropy_fetch_ms=ctx.entropy_fetch_ms,
+            total_sampling_ms=total_sampling_ms,
+            entropy_source_used=ctx.entropy_source_name,
+            entropy_is_fallback=ctx.entropy_is_fallback,
+            sample_mean=ctx.sample_mean,
+            z_score=ctx.z_score,
+            u_value=ctx.u,
+            temperature_strategy=config.temperature_strategy,
+            shannon_entropy=ctx.shannon_entropy,
+            temperature_used=ctx.temperature,
+            token_id=ctx.token_id,
+            token_rank=ctx.token_rank,
+            token_prob=ctx.token_prob,
+            num_candidates=ctx.num_candidates,
+            config_hash=hash_str,
+        )
+        self._logger.log_token(record)
+
+    @staticmethod
+    def _to_numpy(tensor: Any) -> FloatArray:
+        """Convert a tensor to a numpy array with zero-copy where possible."""
         if isinstance(tensor, np.ndarray):
             return tensor
-        # torch.Tensor — use .numpy() for zero-copy on CPU.
         try:
-            # Prefer an explicit CUDA check when available.
             if bool(getattr(tensor, "is_cuda", False)):
                 result: FloatArray = tensor.detach().cpu().numpy()
-            # Fallback for tensor types exposing is_cpu but not is_cuda.
             elif hasattr(tensor, "is_cpu") and not bool(tensor.is_cpu):
                 result = tensor.detach().cpu().numpy()
             else:
@@ -566,13 +503,7 @@ class QRSamplerLogitsProcessor:
             return np.asarray(tensor)
 
     def _force_onehot(self, logits: Any, token_id: int, is_numpy: bool) -> None:
-        """Force 1-D logits to one-hot: all -inf except token_id = 0.0.
-
-        Args:
-            logits: 1-D logit array or tensor.
-            token_id: The selected token index.
-            is_numpy: Whether logits is a numpy array.
-        """
+        """Force 1-D logits to one-hot: all -inf except token_id = 0.0."""
         if is_numpy:
             logits[:] = float("-inf")
             logits[token_id] = 0.0
@@ -581,20 +512,18 @@ class QRSamplerLogitsProcessor:
             logits[token_id] = 0.0
 
     def _force_onehot_row(self, logits: Any, row_idx: int, token_id: int, is_numpy: bool) -> None:
-        """Force a batch row to one-hot: all -inf except token_id = 0.0.
-
-        Args:
-            logits: 2-D logit array or tensor.
-            row_idx: Batch row index.
-            token_id: The selected token index.
-            is_numpy: Whether logits is a numpy array.
-        """
+        """Force a batch row to one-hot: all -inf except token_id = 0.0."""
         if is_numpy:
             logits[row_idx, :] = float("-inf")
             logits[row_idx, token_id] = 0.0
         else:
             logits[row_idx].copy_(self._onehot_template, non_blocking=True)
             logits[row_idx, token_id] = 0.0
+
+    @property
+    def pipeline(self) -> list[PipelineStage]:
+        """The active pipeline stages."""
+        return self._pipeline
 
     @property
     def entropy_source(self) -> EntropySource:

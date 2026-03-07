@@ -22,17 +22,25 @@ from qr_sampler.exceptions import (
     SignalAmplificationError,
     TokenSelectionError,
 )
+from qr_sampler.pipeline.context import SamplingContext
+from qr_sampler.pipeline.registry import StageRegistry
+from qr_sampler.pipeline.stage import PipelineStage
 from qr_sampler.processor import QRSamplerLogitsProcessor
+from qr_sampler.stages import build_default_pipeline
 
 __all__ = [
     "ConfigValidationError",
     "EntropyUnavailableError",
+    "PipelineStage",
     "QRSamplerConfig",
     "QRSamplerError",
     "QRSamplerLogitsProcessor",
+    "SamplingContext",
     "SignalAmplificationError",
+    "StageRegistry",
     "TokenSelectionError",
     "__version__",
+    "build_default_pipeline",
     "resolve_config",
     "validate_extra_args",
 ]

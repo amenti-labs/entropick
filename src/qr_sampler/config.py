@@ -35,6 +35,12 @@ _PER_REQUEST_FIELDS: frozenset[str] = frozenset(
         "edt_max_temp",
         "top_k",
         "top_p",
+        "min_p",
+        "xtc_probability",
+        "xtc_threshold",
+        "adaptive_injection",
+        "adaptive_injection_low_h",
+        "adaptive_injection_high_h",
         "log_level",
         "diagnostic_mode",
         "logit_noise_alpha",
@@ -202,18 +208,61 @@ class QRSamplerConfig(BaseSettings):
         default=1.0,
         description="Nucleus sampling threshold (1.0 disables)",
     )
+    min_p: float = Field(
+        default=0.0,
+        description="Min-P threshold: remove tokens with p < min_p * max(p). 0 = disabled.",
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+
+    # --- XTC: Exclude Top Choices (per-request overridable) ---
+
+    xtc_probability: float = Field(
+        default=0.0,
+        description="XTC: probability of excluding each top token. 0 = disabled.",
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    xtc_threshold: float = Field(
+        default=0.1,
+        description="XTC: only tokens with p >= threshold are candidates for exclusion.",
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+
+    # --- Adaptive Injection (per-request overridable) ---
+
+    adaptive_injection: bool = Field(
+        default=False,
+        description="Scale injection intensity by distribution entropy/varentropy.",
+    )
+    adaptive_injection_low_h: float = Field(
+        default=1.0,
+        description="Entropy threshold below which model is 'confident' (nats).",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    adaptive_injection_high_h: float = Field(
+        default=3.0,
+        description="Entropy threshold above which model is 'uncertain' (nats).",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
 
     # --- Injection methods (per-request overridable) ---
 
     logit_noise_alpha: float = Field(
         default=0.0,
-        description="M1: Gaussian logit noise magnitude. 0 = disabled.",
+        description="M1: Logit noise magnitude. 0 = disabled.",
         ge=0.0,
         allow_inf_nan=False,
     )
     logit_noise_sigma: float = Field(
         default=1.0,
-        description="M1: Standard deviation of Gaussian noise before scaling by alpha.",
+        description="M1: Standard deviation of noise before scaling by alpha.",
         ge=0.0,
         allow_inf_nan=False,
     )
@@ -240,7 +289,6 @@ class QRSamplerConfig(BaseSettings):
         default=False,
         description="Log injection method activity at each token.",
     )
-
     # --- Logging (per-request overridable) ---
 
     log_level: str = Field(

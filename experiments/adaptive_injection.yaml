@@ -1,0 +1,32 @@
+# Adaptive injection: concentrate quantum influence at choice points.
+# Scales injection intensity by distribution entropy/varentropy.
+# Low entropy (confident model) -> skip injection.
+# High entropy (uncertain model) -> full injection strength.
+#
+# Dramatically improves signal-to-noise for consciousness experiments
+# by not wasting entropy on deterministic tokens.
+
+name: adaptive_injection_m1_m2
+description: Entropy-adaptive injection with M1 + M2
+
+env:
+  QR_ENTROPY_SOURCE_TYPE: system
+  QR_FALLBACK_MODE: system
+  QR_TEMPERATURE_STRATEGY: fixed
+  QR_FIXED_TEMPERATURE: "0.7"
+  QR_TOP_K: "50"
+  QR_TOP_P: "0.95"
+  # Adaptive injection
+  QR_ADAPTIVE_INJECTION: "true"
+  QR_ADAPTIVE_INJECTION_LOW_H: "1.0"
+  QR_ADAPTIVE_INJECTION_HIGH_H: "3.0"
+  # M1: Logit noise (scaled by adaptive)
+  QR_LOGIT_NOISE_ALPHA: "0.2"
+  QR_LOGIT_NOISE_SIGMA: "1.0"
+  # M2: Temperature variance (scaled by adaptive)
+  QR_TEMP_VARIANCE_BETA: "0.5"
+
+# Sweep suggestions for thresholds:
+#   narrow:  QR_ADAPTIVE_INJECTION_LOW_H=2.0  QR_ADAPTIVE_INJECTION_HIGH_H=4.0
+#   medium:  QR_ADAPTIVE_INJECTION_LOW_H=1.0  QR_ADAPTIVE_INJECTION_HIGH_H=3.0
+#   wide:    QR_ADAPTIVE_INJECTION_LOW_H=0.5  QR_ADAPTIVE_INJECTION_HIGH_H=2.0
