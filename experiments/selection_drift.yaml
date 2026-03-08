@@ -1,0 +1,23 @@
+# Selection Drift experiment.
+# Per-request drift position that evolves based on quantum entropy.
+# Creates temporal correlations across tokens within a request.
+#
+# Drift evolves: new_pos = (pos + step * (qval - 0.5)) % 1.0
+
+name: selection_drift
+description: Per-request selection drift with quantum entropy
+
+env:
+  QR_ENTROPY_SOURCE_TYPE: system
+  QR_FALLBACK_MODE: system
+  QR_TEMPERATURE_STRATEGY: fixed
+  QR_FIXED_TEMPERATURE: "0.7"
+  QR_TOP_K: "50"
+  QR_TOP_P: "0.95"
+  QR_DRIFT_STEP: "0.1"
+  QR_DRIFT_INITIAL_POSITION: "0.5"
+
+# Sweep suggestions for drift_step:
+#   gentle:  QR_DRIFT_STEP=0.05
+#   medium:  QR_DRIFT_STEP=0.1
+#   strong:  QR_DRIFT_STEP=0.2

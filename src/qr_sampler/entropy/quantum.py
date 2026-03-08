@@ -30,6 +30,8 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
+import grpc
+
 from qr_sampler.entropy.base import EntropySource
 from qr_sampler.entropy.registry import register_entropy_source
 from qr_sampler.exceptions import ConfigValidationError, EntropyUnavailableError
@@ -165,6 +167,30 @@ def _generic_response_deserializer(data: bytes) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# TLS helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_pem_file(path: str) -> bytes:
+    """Read a PEM file and return its contents as bytes.
+
+    Args:
+        path: Filesystem path to the PEM file.
+
+    Returns:
+        Raw PEM file contents.
+
+    Raises:
+        EntropyUnavailableError: If the file cannot be read.
+    """
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError as exc:
+        raise EntropyUnavailableError(f"Failed to read TLS PEM file: {path}: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
 # Source implementation
 # ---------------------------------------------------------------------------
 
@@ -204,6 +230,10 @@ class QuantumGrpcSource(EntropySource):
         self._stream_method_path = config.grpc_stream_method_path
         self._api_key = config.grpc_api_key
         self._api_key_header = config.grpc_api_key_header
+        self._tls_enabled = config.grpc_tls_enabled
+        self._tls_ca_cert = config.grpc_tls_ca_cert
+        self._tls_client_cert = config.grpc_tls_client_cert
+        self._tls_client_key = config.grpc_tls_client_key
         self._closed = False
 
         # Validate streaming config upfront.
@@ -252,7 +282,13 @@ class QuantumGrpcSource(EntropySource):
         self._loop.run_forever()
 
     async def _init_channel(self) -> None:
-        """Create the gRPC async channel and generic method handles."""
+        """Create the gRPC async channel and generic method handles.
+
+        Uses ``grpc.aio.secure_channel()`` with TLS credentials when
+        ``grpc_tls_enabled`` is ``True``. Supports both server-only TLS
+        (CA cert) and mutual TLS (client cert + key).
+        """
+        import grpc
         import grpc.aio
 
         options = [
@@ -262,7 +298,18 @@ class QuantumGrpcSource(EntropySource):
             ("grpc.http2.max_pings_without_data", 0),
         ]
 
-        self._channel = grpc.aio.insecure_channel(self._address, options=options)
+        if self._tls_enabled:
+            root_certs = _read_pem_file(self._tls_ca_cert) if self._tls_ca_cert else None
+            private_key = _read_pem_file(self._tls_client_key) if self._tls_client_key else None
+            cert_chain = _read_pem_file(self._tls_client_cert) if self._tls_client_cert else None
+            credentials = grpc.ssl_channel_credentials(
+                root_certificates=root_certs,
+                private_key=private_key,
+                certificate_chain=cert_chain,
+            )
+            self._channel = grpc.aio.secure_channel(self._address, credentials, options=options)
+        else:
+            self._channel = grpc.aio.insecure_channel(self._address, options=options)
 
         # Generic unary method handle — works with any proto that uses
         # field 1 varint (request) and field 1 bytes (response).
@@ -335,7 +382,7 @@ class QuantumGrpcSource(EntropySource):
                 self._update_latency(elapsed_ms)
                 self._consecutive_failures = 0
                 return data
-            except Exception as exc:
+            except EntropyUnavailableError as exc:
                 last_error = exc
                 logger.warning(
                     "gRPC entropy fetch attempt %d/%d failed: %s",
@@ -369,7 +416,7 @@ class QuantumGrpcSource(EntropySource):
             raise EntropyUnavailableError(
                 f"gRPC entropy fetch timed out after {timeout_s * 1000:.0f}ms"
             ) from exc
-        except Exception as exc:
+        except (grpc.RpcError, asyncio.TimeoutError, OSError) as exc:
             raise EntropyUnavailableError(f"gRPC entropy fetch failed: {exc}") from exc
 
     async def _fetch_async(self, n: int) -> bytes:
@@ -509,6 +556,7 @@ class QuantumGrpcSource(EntropySource):
             "mode": self._mode,
             "method_path": self._method_path,
             "authenticated": bool(self._api_key),
+            "tls_enabled": self._tls_enabled,
             "circuit_open": self._circuit_open,
             "p99_ms": round(self._p99_ms, 2),
             "consecutive_failures": self._consecutive_failures,

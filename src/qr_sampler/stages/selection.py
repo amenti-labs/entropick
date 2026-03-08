@@ -25,6 +25,10 @@ class SelectionStage:
         self._selector = TokenSelector()
 
     def __call__(self, ctx: SamplingContext) -> None:
+        # Skip if another stage (mirostat, gumbel) already selected a token.
+        if ctx.token_id >= 0:
+            return
+
         selection = self._selector.select(
             ctx.row,
             ctx.temperature,

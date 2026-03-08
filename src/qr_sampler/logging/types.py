@@ -29,6 +29,10 @@ class TokenSamplingRecord:
         token_prob: Probability of the selected token.
         num_candidates: Number of tokens surviving filtering.
         config_hash: 16-char SHA-256 prefix of the active config.
+        injection_alpha: Effective logit perturbation alpha (after adaptive scaling).
+        injection_beta: Effective temperature modulation beta (after adaptive scaling).
+        injection_step: Effective selection drift step (after adaptive scaling).
+        injection_scale: Adaptive injection scale factor applied to all injection methods.
     """
 
     # Timing
@@ -58,3 +62,16 @@ class TokenSamplingRecord:
 
     # Config snapshot
     config_hash: str
+
+    # Injection method tracking (what was active for this token)
+    injection_alpha: float = 0.0
+    """Effective logit perturbation alpha used (after adaptive scaling)."""
+
+    injection_beta: float = 0.0
+    """Effective temperature modulation beta used (after adaptive scaling)."""
+
+    injection_step: float = 0.0
+    """Effective selection drift step used (after adaptive scaling)."""
+
+    injection_scale: float = 1.0
+    """Adaptive injection scale factor applied to all injection methods."""

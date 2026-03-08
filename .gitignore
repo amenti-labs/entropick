@@ -58,3 +58,9 @@ src/qr_sampler/_version.py
 
 # WebUI
 .webui_secret_key
+
+# Sandbox (ad-hoc scripts, notes, experiments)
+sandbox/
+
+# Research (private notes and roadmaps)
+research/

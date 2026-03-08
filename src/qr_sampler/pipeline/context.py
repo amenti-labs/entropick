@@ -24,7 +24,7 @@ class SamplingContext:
 
     Stages read the fields they need and write the fields they produce.
     Convention: stages should not overwrite fields set by earlier stages
-    unless that is their explicit purpose (e.g., CorrelatedWalk replaces ``u``).
+    unless that is their explicit purpose (e.g., SelectionDrift replaces ``u``).
     """
 
     # --- Input (set by processor before pipeline runs) ---
@@ -52,7 +52,7 @@ class SamplingContext:
     stage_state: dict[str, Any] = field(default_factory=dict)
     """Persistent state that survives across apply() calls.
 
-    Keyed by stage name (e.g., ``"correlated_walk.position"``).
+    Keyed by stage name (e.g., ``"selection_drift.position"``).
     The processor copies this from/to the per-request state store.
     """
 
@@ -99,8 +99,24 @@ class SamplingContext:
     """Scaling factor for injection methods (0.0 = skip, 1.0 = full strength).
 
     Set by ``AdaptiveInjectionStage`` based on distribution entropy/varentropy.
-    Read by injection stages (M1, M2, M3) to modulate their intensity.
+    Read by injection stages to modulate their intensity.
     """
+
+    # --- Varentropy (for Entropix regime switching) ---
+
+    varentropy: float = 0.0
+    """Variance of per-token information content (nats^2)."""
+
+    # --- Injection tracking (written by stages, read by processor for logging) ---
+
+    effective_alpha: float = 0.0
+    """Effective logit perturbation alpha used (after adaptive scaling)."""
+
+    effective_beta: float = 0.0
+    """Effective temperature modulation beta used (after adaptive scaling)."""
+
+    effective_step: float = 0.0
+    """Effective drift step used (after adaptive scaling)."""
 
     # --- Timing (accumulated by stages) ---
 

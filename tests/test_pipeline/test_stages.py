@@ -19,13 +19,20 @@ if TYPE_CHECKING:
     from qr_sampler.pipeline.context import SamplingContext
 from qr_sampler.stages import (
     AdaptiveInjectionStage,
-    CorrelatedWalkStage,
+    DRYPenaltyStage,
     EntropyFetchStage,
-    LogitNoiseStage,
+    EtaSamplingStage,
+    GumbelSelectionStage,
+    LogitPerturbationStage,
     MinPStage,
+    MirostatStage,
+    SelectionDriftStage,
     SelectionStage,
+    TailFreeSamplingStage,
+    TemperatureModulationStage,
     TemperatureStage,
-    TempVarianceStage,
+    TopNSigmaStage,
+    TypicalSamplingStage,
     XTCStage,
     build_default_pipeline,
 )
@@ -44,13 +51,20 @@ class TestPipelineStageProtocol:
         "stage_cls",
         [
             AdaptiveInjectionStage,
-            LogitNoiseStage,
+            LogitPerturbationStage,
+            DRYPenaltyStage,
+            TopNSigmaStage,
             TemperatureStage,
-            TempVarianceStage,
+            TemperatureModulationStage,
             MinPStage,
+            TailFreeSamplingStage,
+            TypicalSamplingStage,
+            EtaSamplingStage,
             XTCStage,
             EntropyFetchStage,
-            CorrelatedWalkStage,
+            SelectionDriftStage,
+            MirostatStage,
+            GumbelSelectionStage,
             SelectionStage,
         ],
     )
@@ -79,20 +93,27 @@ class TestStageRegistry:
     """Test the StageRegistry discovery and lookup."""
 
     def test_builtin_stages_registered(self) -> None:
-        """All 9 built-in stages are registered."""
+        """All 16 built-in stages are registered."""
         registered = StageRegistry.list_registered()
         expected = {
             "adaptive_injection",
-            "logit_noise",
+            "logit_perturbation",
+            "dry",
+            "top_n_sigma",
             "temperature",
-            "temp_variance",
+            "temp_modulation",
             "min_p",
+            "tfs",
+            "typical",
+            "eta",
             "xtc",
             "entropy_fetch",
-            "correlated_walk",
+            "selection_drift",
+            "mirostat",
+            "gumbel_selection",
             "selection",
         }
-        assert expected.issubset(set(registered))
+        assert expected == set(registered)
 
     def test_get_known_stage(self) -> None:
         """Can look up a registered stage by name."""
@@ -108,10 +129,10 @@ class TestStageRegistry:
 class TestBuildDefaultPipeline:
     """Test the default pipeline builder."""
 
-    def test_returns_9_stages(self) -> None:
-        """Default pipeline has 9 stages."""
+    def test_returns_16_stages(self) -> None:
+        """Default pipeline has 16 stages."""
         pipeline = build_default_pipeline()
-        assert len(pipeline) == 9
+        assert len(pipeline) == 16
 
     def test_returns_fresh_list(self) -> None:
         """Each call returns a new list (safe to mutate)."""
@@ -125,13 +146,20 @@ class TestBuildDefaultPipeline:
         names = [s.name for s in pipeline]
         assert names == [
             "adaptive_injection",
-            "logit_noise",
+            "logit_perturbation",
+            "dry",
+            "top_n_sigma",
             "temperature",
-            "temp_variance",
+            "temp_modulation",
             "min_p",
+            "tfs",
+            "typical",
+            "eta",
             "xtc",
             "entropy_fetch",
-            "correlated_walk",
+            "selection_drift",
+            "mirostat",
+            "gumbel_selection",
             "selection",
         ]
 
@@ -184,7 +212,7 @@ class TestCustomPipeline:
     def test_pipeline_property(self) -> None:
         """Processor exposes its pipeline via property."""
         proc = make_processor()
-        assert len(proc.pipeline) == 9
+        assert len(proc.pipeline) == 16
         assert all(isinstance(s, PipelineStage) for s in proc.pipeline)
 
     def test_processor_accepts_pipeline_arg(self) -> None:
@@ -226,37 +254,37 @@ class TestCustomPipeline:
 class TestStageState:
     """Test persistent stage state via stage_state dict."""
 
-    def test_correlated_walk_uses_stage_state(self) -> None:
-        """CorrelatedWalk reads/writes stage_state instead of walk_position."""
-        proc = make_processor(walk_step=0.1)
+    def test_selection_drift_uses_stage_state(self) -> None:
+        """SelectionDrift reads/writes stage_state instead of drift_position."""
+        proc = make_processor(drift_step=0.1)
         register_request(proc, req_index=0)
 
-        # Verify initial walk position is in stage_state.
+        # Verify initial drift position is in stage_state.
         state = proc._request_states[0]
-        assert "correlated_walk.position" in state.stage_state
-        assert state.stage_state["correlated_walk.position"] == pytest.approx(0.5)
+        assert "selection_drift.position" in state.stage_state
+        assert state.stage_state["selection_drift.position"] == pytest.approx(0.5)
 
         # Apply and verify it changed.
         logits = np.array([SAMPLE_LOGITS])
         proc.apply(logits)
 
-        new_pos = state.stage_state["correlated_walk.position"]
+        new_pos = state.stage_state["selection_drift.position"]
         assert new_pos != pytest.approx(0.5)
 
-    def test_walk_position_property_compat(self) -> None:
-        """_RequestState.walk_position property reads from stage_state."""
-        proc = make_processor(walk_step=0.1)
+    def test_drift_position_property_compat(self) -> None:
+        """_RequestState.drift_position property reads from stage_state."""
+        proc = make_processor(drift_step=0.1)
         register_request(proc, req_index=0)
 
         state = proc._request_states[0]
-        assert state.walk_position == pytest.approx(0.5)
+        assert state.drift_position == pytest.approx(0.5)
 
-        state.walk_position = 0.75
-        assert state.stage_state["correlated_walk.position"] == pytest.approx(0.75)
+        state.drift_position = 0.75
+        assert state.stage_state["selection_drift.position"] == pytest.approx(0.75)
 
-    def test_m3_marks_diagnostics_nan(self) -> None:
-        """When M3 is active, amplifier diagnostics are NaN."""
-        proc = make_processor(walk_step=0.1, diagnostic_mode=True)
+    def test_selection_drift_marks_diagnostics_nan(self) -> None:
+        """When selection drift is active, amplifier diagnostics are NaN."""
+        proc = make_processor(drift_step=0.1, diagnostic_mode=True)
         register_request(proc, req_index=0)
 
         logits = np.array([SAMPLE_LOGITS])

@@ -1,0 +1,23 @@
+# Logit Perturbation experiment.
+# Direct per-logit quantum noise injection before temperature scaling.
+#
+# Each noise dimension independently quantum-derived via the probit transform.
+# Benchmark spec: logits += alpha * sigma * probit(uint32_to_float(source.get_bytes(vocab*4)))
+
+name: logit_perturbation
+description: Per-logit quantum perturbation (Entropy Seeding Benchmark Method 1)
+
+env:
+  QR_ENTROPY_SOURCE_TYPE: system
+  QR_FALLBACK_MODE: system
+  QR_TEMPERATURE_STRATEGY: fixed
+  QR_FIXED_TEMPERATURE: "0.7"
+  QR_TOP_K: "50"
+  QR_TOP_P: "0.95"
+  QR_LOGIT_PERTURBATION_ALPHA: "0.3"
+  QR_LOGIT_PERTURBATION_SIGMA: "1.0"
+
+# Sweep suggestions for alpha:
+#   mild:   QR_LOGIT_PERTURBATION_ALPHA=0.1
+#   medium: QR_LOGIT_PERTURBATION_ALPHA=0.3
+#   strong: QR_LOGIT_PERTURBATION_ALPHA=1.0

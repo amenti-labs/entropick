@@ -50,7 +50,7 @@ class TestTokenSamplingRecord:
         assert hasattr(record, "__slots__")
 
     def test_all_fields_accessible(self) -> None:
-        """All 16 fields should be readable."""
+        """All 20 fields should be readable."""
         record = _make_record()
         assert record.timestamp_ns == 1000000000
         assert record.entropy_fetch_ms == 1.5
@@ -68,6 +68,11 @@ class TestTokenSamplingRecord:
         assert record.token_prob == 0.15
         assert record.num_candidates == 50
         assert record.config_hash == "abcdef1234567890"
+        # Injection tracking fields (defaults)
+        assert record.injection_alpha == 0.0
+        assert record.injection_beta == 0.0
+        assert record.injection_step == 0.0
+        assert record.injection_scale == 1.0
 
 
 class TestSamplingLogger:

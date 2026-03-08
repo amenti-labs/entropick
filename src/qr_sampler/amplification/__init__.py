@@ -6,6 +6,7 @@ in the entropy source.
 """
 
 from qr_sampler.amplification.base import AmplificationResult, SignalAmplifier
+from qr_sampler.amplification.calibration import calibrate_population_stats, measure_entropy_rate
 from qr_sampler.amplification.ecdf import ECDFAmplifier
 from qr_sampler.amplification.registry import AmplifierRegistry
 from qr_sampler.amplification.zscore import ZScoreMeanAmplifier
@@ -16,4 +17,6 @@ __all__ = [
     "ECDFAmplifier",
     "SignalAmplifier",
     "ZScoreMeanAmplifier",
+    "calibrate_population_stats",
+    "measure_entropy_rate",
 ]

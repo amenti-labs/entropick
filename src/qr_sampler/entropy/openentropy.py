@@ -72,6 +72,18 @@ class OpenEntropySource(EntropySource):
         self._pool = EntropyPool.auto()
         self._closed = False
 
+        # Validate named sources at startup.
+        oe_sources = config.oe_sources.strip()
+        if oe_sources:
+            available_names = self._pool.source_names()
+            for src_name in (s.strip() for s in oe_sources.split(",") if s.strip()):
+                if src_name not in available_names:
+                    logger.warning(
+                        "OpenEntropy source %r not found in pool; available: %s",
+                        src_name,
+                        ", ".join(available_names),
+                    )
+
     @property
     def name(self) -> str:
         """Return ``'openentropy'``."""
@@ -105,26 +117,26 @@ class OpenEntropySource(EntropySource):
         try:
             oe_sources = self._config.oe_sources.strip()
             if oe_sources:
-                # Sample from specific named sources.
+                # Sample from specific named sources, round-robin until we have n bytes.
                 source_names = [s.strip() for s in oe_sources.split(",") if s.strip()]
                 combined = b""
-                for source_name in source_names:
-                    # Some sources have per-call byte limits, so collect
-                    # in chunks of up to 8192 bytes until we have enough.
-                    remaining = n
-                    while remaining > 0:
-                        request_size = min(remaining, 8192)
-                        chunk = self._pool.get_source_bytes(
-                            source_name,
-                            request_size,
-                            conditioning=self._config.oe_conditioning,
+                remaining = n
+                source_idx = 0
+                while remaining > 0:
+                    source_name = source_names[source_idx % len(source_names)]
+                    request_size = min(remaining, 8192)
+                    chunk = self._pool.get_source_bytes(
+                        source_name,
+                        request_size,
+                        conditioning=self._config.oe_conditioning,
+                    )
+                    if chunk is None:
+                        raise EntropyUnavailableError(
+                            f"OpenEntropy source '{source_name}' returned no data"
                         )
-                        if chunk is None:
-                            raise EntropyUnavailableError(
-                                f"OpenEntropy source '{source_name}' returned no data"
-                            )
-                        combined += chunk
-                        remaining -= len(chunk)
+                    combined += chunk
+                    remaining -= len(chunk)
+                    source_idx += 1
                 return combined[:n]
 
             # Collect from all sources, then draw bytes.
@@ -132,9 +144,7 @@ class OpenEntropySource(EntropySource):
                 parallel=self._config.oe_parallel,
                 timeout=self._config.oe_timeout,
             )
-            raw_bytes = self._pool.get_bytes(
-                n, conditioning=self._config.oe_conditioning
-            )
+            raw_bytes = self._pool.get_bytes(n, conditioning=self._config.oe_conditioning)
             result: bytes = bytes(raw_bytes)
             return result
         except RuntimeError as e:

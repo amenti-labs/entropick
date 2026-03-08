@@ -20,7 +20,7 @@ class AdaptiveInjectionStage:
     between ``adaptive_injection_low_h`` (scale=0) and
     ``adaptive_injection_high_h`` (scale=1).
 
-    Downstream injection stages (M1, M2, M3) read ``ctx.injection_scale``
+    Downstream injection stages read ``ctx.injection_scale``
     and multiply their parameters by it.  When the model is confident
     (low H), injection is suppressed.  When uncertain (high H), injection
     runs at full strength.

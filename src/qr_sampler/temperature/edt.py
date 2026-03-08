@@ -19,7 +19,6 @@ from qr_sampler.temperature.base import (
 from qr_sampler.temperature.registry import TemperatureStrategyRegistry
 
 if TYPE_CHECKING:
-
     from qr_sampler.config import QRSamplerConfig
 
 

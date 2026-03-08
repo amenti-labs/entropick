@@ -126,7 +126,8 @@ class ECDFAmplifier(SignalAmplifier):
         sample_mean = float(np.frombuffer(raw_bytes, dtype=np.uint8).mean())
 
         # Binary search in the sorted calibration means.
-        assert self._sorted_means is not None  # guarded by _calibrated
+        if self._sorted_means is None:
+            raise SignalAmplificationError("Internal error: sorted_means is None after calibration")
         rank = int(np.searchsorted(self._sorted_means, sample_mean, side="right"))
         n = len(self._sorted_means)
 

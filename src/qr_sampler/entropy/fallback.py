@@ -45,6 +45,11 @@ class FallbackEntropySource(EntropySource):
         return self._primary.is_available or self._fallback.is_available
 
     @property
+    def primary_name(self) -> str:
+        """Name of the primary entropy source."""
+        return self._primary.name
+
+    @property
     def last_source_used(self) -> str:
         """Name of the source that provided bytes on the last call."""
         return self._last_source_used

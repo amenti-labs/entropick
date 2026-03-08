@@ -11,6 +11,7 @@ from qr_sampler.exceptions import EntropyUnavailableError
 
 _POOL_TARGET = "qr_sampler.entropy.openentropy.EntropyPool"
 
+
 def _make_config(**overrides: object) -> QRSamplerConfig:
     """Create a QRSamplerConfig with openentropy-relevant defaults."""
     return QRSamplerConfig(_env_file=None, **overrides)  # type: ignore[call-arg]
@@ -197,10 +198,11 @@ class TestOpenEntropySource:
             }
 
     def test_source_filtering(self) -> None:
-        """When oe_sources is set, get_source_bytes should be called per source."""
+        """When oe_sources is set, bytes are collected round-robin across sources."""
         config = _make_config(oe_sources="clock_jitter,dram_row_buffer")
         n = 64
-        mock_pool = _make_mock_pool(source_count=2, bytes_return=b"\xff" * n)
+        # Each call returns 32 bytes, so we need calls to both sources.
+        mock_pool = _make_mock_pool(source_count=2, bytes_return=b"\xff" * 32)
         mock_pool_class = MagicMock(spec=[])
         mock_pool_class.auto = MagicMock(return_value=mock_pool)
 
@@ -217,15 +219,14 @@ class TestOpenEntropySource:
             mock_pool.collect_all.assert_not_called()
             mock_pool.get_bytes.assert_not_called()
 
-            # Should call get_source_bytes for each named source.
+            # Round-robin: first clock_jitter (32 bytes), then dram_row_buffer (32 bytes).
             assert mock_pool.get_source_bytes.call_count == 2
             calls = mock_pool.get_source_bytes.call_args_list
-            assert calls[0][0] == ("clock_jitter", n)
+            assert calls[0][0][0] == "clock_jitter"
             assert calls[0][1] == {"conditioning": "raw"}
-            assert calls[1][0] == ("dram_row_buffer", n)
+            assert calls[1][0][0] == "dram_row_buffer"
             assert calls[1][1] == {"conditioning": "raw"}
 
-            # Result is truncated to n bytes.
             assert len(result) == n
 
     def test_raises_entropy_unavailable_on_runtime_error(

@@ -31,10 +31,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/qr-sampler/qr-sampler"
-Repository = "https://github.com/qr-sampler/qr-sampler"
-Issues = "https://github.com/qr-sampler/qr-sampler/issues"
-Changelog = "https://github.com/qr-sampler/qr-sampler/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ereid7/Quantum-random-vLLM-sampler"
+Repository = "https://github.com/ereid7/Quantum-random-vLLM-sampler"
+Issues = "https://github.com/ereid7/Quantum-random-vLLM-sampler/issues"
+Changelog = "https://github.com/ereid7/Quantum-random-vLLM-sampler/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 openentropy = [
@@ -58,17 +58,25 @@ system = "qr_sampler.entropy.system:SystemEntropySource"
 quantum_grpc = "qr_sampler.entropy.quantum:QuantumGrpcSource"
 timing_noise = "qr_sampler.entropy.timing:TimingNoiseSource"
 mock_uniform = "qr_sampler.entropy.mock:MockUniformSource"
+sham_qrng = "qr_sampler.entropy.sham:ShamQrngSource"
 openentropy = "qr_sampler.entropy.openentropy:OpenEntropySource"
 
 [project.entry-points."qr_sampler.pipeline_stages"]
 adaptive_injection = "qr_sampler.stages.adaptive_injection:AdaptiveInjectionStage"
-logit_noise = "qr_sampler.stages.logit_noise:LogitNoiseStage"
+logit_perturbation = "qr_sampler.stages.logit_perturbation:LogitPerturbationStage"
+dry = "qr_sampler.stages.dry:DRYPenaltyStage"
+top_n_sigma = "qr_sampler.stages.top_n_sigma:TopNSigmaStage"
 temperature = "qr_sampler.stages.temperature:TemperatureStage"
-temp_variance = "qr_sampler.stages.temp_variance:TempVarianceStage"
+temp_modulation = "qr_sampler.stages.temp_modulation:TemperatureModulationStage"
 min_p = "qr_sampler.stages.min_p:MinPStage"
+tfs = "qr_sampler.stages.tfs:TailFreeSamplingStage"
+typical = "qr_sampler.stages.typical:TypicalSamplingStage"
+eta = "qr_sampler.stages.eta:EtaSamplingStage"
 xtc = "qr_sampler.stages.xtc:XTCStage"
 entropy_fetch = "qr_sampler.stages.entropy_fetch:EntropyFetchStage"
-correlated_walk = "qr_sampler.stages.correlated_walk:CorrelatedWalkStage"
+selection_drift = "qr_sampler.stages.selection_drift:SelectionDriftStage"
+mirostat = "qr_sampler.stages.mirostat:MirostatStage"
+gumbel_selection = "qr_sampler.stages.gumbel_selection:GumbelSelectionStage"
 selection = "qr_sampler.stages.selection:SelectionStage"
 
 [tool.setuptools.packages.find]

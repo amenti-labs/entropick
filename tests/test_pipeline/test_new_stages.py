@@ -71,9 +71,7 @@ class TestMinPStage:
     def test_per_request_override(self) -> None:
         """min_p can be overridden per-request."""
         proc = make_processor(diagnostic_mode=True)
-        register_request(
-            proc, req_index=0, extra_args={"qr_min_p": 0.99}
-        )
+        register_request(proc, req_index=0, extra_args={"qr_min_p": 0.99})
 
         logits = np.array([SAMPLE_LOGITS])
         proc.apply(logits)
@@ -197,7 +195,7 @@ class TestAdaptiveInjectionStage:
 
     def test_disabled_by_default(self) -> None:
         """Adaptive injection is off by default."""
-        proc = make_processor(logit_noise_alpha=0.5, diagnostic_mode=True)
+        proc = make_processor(logit_perturbation_alpha=0.5, diagnostic_mode=True)
         register_request(proc, req_index=0)
 
         logits = np.array([SAMPLE_LOGITS])
@@ -213,6 +211,7 @@ class TestAdaptiveInjectionStage:
         from qr_sampler.config import QRSamplerConfig
         from qr_sampler.pipeline.context import SamplingContext
         from qr_sampler.stages.adaptive_injection import AdaptiveInjectionStage
+
         old = os.environ.get("QR_ENTROPY_SOURCE_TYPE")
         os.environ["QR_ENTROPY_SOURCE_TYPE"] = "mock_uniform"
         try:
@@ -258,13 +257,13 @@ class TestAdaptiveInjectionStage:
         # ln(50) ~ 3.91 -> scale = (3.91 - 1.0) / (3.0 - 1.0) = 1.0 (clamped)
         assert ctx_uniform.injection_scale > 0.5
 
-    def test_scale_zero_suppresses_m1(self) -> None:
-        """When model is confident, M1 logit noise is suppressed."""
+    def test_scale_zero_suppresses_logit_perturbation(self) -> None:
+        """When model is confident, logit perturbation is suppressed."""
         proc = make_processor(
             adaptive_injection=True,
             adaptive_injection_low_h=10.0,  # Very high -> everything is "low H"
             adaptive_injection_high_h=20.0,
-            logit_noise_alpha=1.0,
+            logit_perturbation_alpha=1.0,
             diagnostic_mode=True,
         )
         register_request(proc, req_index=0)
@@ -282,7 +281,7 @@ class TestAdaptiveInjectionStage:
             adaptive_injection=True,
             adaptive_injection_low_h=0.0,  # Everything above 0 gets some scale
             adaptive_injection_high_h=0.5,  # Very low -> everything is "high H"
-            logit_noise_alpha=0.5,
+            logit_perturbation_alpha=0.5,
             diagnostic_mode=True,
         )
         register_request(proc, req_index=0)
@@ -315,6 +314,7 @@ class TestAdaptiveInjectionStage:
         from qr_sampler.config import QRSamplerConfig
         from qr_sampler.pipeline.context import SamplingContext
         from qr_sampler.stages.adaptive_injection import AdaptiveInjectionStage
+
         old = os.environ.get("QR_ENTROPY_SOURCE_TYPE")
         os.environ["QR_ENTROPY_SOURCE_TYPE"] = "mock_uniform"
         try:
@@ -362,14 +362,14 @@ class TestCombinedNewStages:
         assert_onehot(result[0])
 
     def test_all_new_stages_with_existing(self) -> None:
-        """All new stages + M1/M2/M3 work together."""
+        """All new stages + injection methods work together."""
         proc = make_processor(
             adaptive_injection=True,
             adaptive_injection_low_h=0.0,
             adaptive_injection_high_h=2.0,
-            logit_noise_alpha=0.1,
-            temp_variance_beta=0.2,
-            walk_step=0.05,
+            logit_perturbation_alpha=0.1,
+            temp_modulation_beta=0.2,
+            drift_step=0.05,
             min_p=0.1,
             xtc_probability=0.3,
             xtc_threshold=0.1,
@@ -452,7 +452,9 @@ class TestNewStagesEdgeCases:
     def test_xtc_all_inf_except_one(self) -> None:
         """XTC with only one finite token keeps it."""
         proc = make_processor(
-            xtc_probability=1.0, xtc_threshold=0.0, diagnostic_mode=True,
+            xtc_probability=1.0,
+            xtc_threshold=0.0,
+            diagnostic_mode=True,
         )
         register_request(proc, req_index=0)
         logits = np.full((1, 5), -np.inf, dtype=np.float32)

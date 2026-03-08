@@ -32,37 +32,59 @@ This is a research tool. It makes no claims about consciousness or quantum mecha
 
 ## How it works
 
-qr-sampler processes logits through a **pipeline of 9 stages**, each operating on a shared `SamplingContext`. Stages are modular — disable any by setting its config to zero/false.
+qr-sampler processes logits through a **pipeline of 16 stages**, each operating on a shared `SamplingContext`. Stages are modular — disable any by setting its config to zero/false.
 
 ```
 Logits from vLLM (one row per batch request)
   │
-  ├─ Adaptive Injection ────── Compute injection_scale from Shannon entropy H
-  │   (scales M1/M2/M3)          of the logit distribution
+  ├─ 1. Adaptive Injection ── Compute injection_scale from Shannon entropy H
+  │     (scales perturbation/     of the logit distribution
+  │      modulation/drift)
   │
-  ├─ M1: Logit Noise ──────── Add per-logit quantum Gaussian noise
-  │   (α * σ * probit(qbytes))    fetches vocab_size×4 quantum bytes
+  ├─ 2. Logit Perturbation ── Add per-logit quantum Gaussian noise
+  │     (α * σ * probit(qbytes)) fetches vocab_size×4 quantum bytes
   │
-  ├─ Temperature ───────────── Compute temperature via strategy
-  │   (fixed or EDT)              from the logit distribution
+  ├─ 3. DRY ─────────────── Don't Repeat Yourself: n-gram repetition penalty
+  │     (penalize repeats)       reduces degenerate repetition
   │
-  ├─ M2: Temp Variance ────── Modulate temperature with quantum entropy
-  │   (T × (1 + β(u-0.5)))       per-token quantum modulation
+  ├─ 4. Top-N-Sigma ─────── Keep logits within N standard deviations of max
+  │     (sigma filter)           logit-space outlier removal (pre-softmax)
   │
-  ├─ Min-P ─────────────────── Remove tokens where p < min_p × max(p)
-  │   (dynamic floor)             confidence-adaptive filtering
+  ├─ 5. Temperature ──────── Compute temperature via strategy
+  │     (fixed or EDT)           from the logit distribution
   │
-  ├─ XTC ───────────────────── Quantum coin-flip exclusion of top tokens
-  │   (exclude top choices)       binary decisions from quantum bytes
+  ├─ 6. Temp Modulation ──── Modulate temperature with quantum entropy
+  │     (T × (1 + β(u-0.5)))    per-token quantum modulation
   │
-  ├─ Entropy Fetch ─────────── Fetch fresh random bytes + amplify to u∈(0,1)
-  │   (20,480 bytes → z-score)    just-in-time, after logits exist
+  ├─ 7. Min-P ────────────── Remove tokens where p < min_p × max(p)
+  │     (dynamic floor)          confidence-adaptive filtering
   │
-  ├─ M3: Correlated Walk ──── Drift selection point with temporal memory
-  │   (walk_position ± step)      creates correlations across tokens
+  ├─ 8. TFS ──────────────── Tail-free sampling via second derivatives
+  │     (tail removal)           remove low-info probability tail
   │
-  └─ Selection ─────────────── top-k → softmax → top-p → CDF → select token
-      (force one-hot logits)      vLLM picks exactly this token
+  ├─ 9. Typical ──────────── Locally typical sampling
+  │     (typical info content)   keep tokens near expected surprisal
+  │
+  ├─ 10. Eta ─────────────── Entropy-aware probability cutoff
+  │      (eta threshold)         adaptive filtering by distribution entropy
+  │
+  ├─ 11. XTC ─────────────── Quantum coin-flip exclusion of top tokens
+  │      (exclude top choices)   binary decisions from quantum bytes
+  │
+  ├─ 12. Entropy Fetch ───── Fetch fresh random bytes + amplify to u∈(0,1)
+  │      (20,480 bytes → z)      just-in-time, after logits exist
+  │
+  ├─ 13. Selection Drift ──── Drift selection point with temporal memory
+  │      (drift_position ± step) creates correlations across tokens
+  │
+  ├─ 14. Mirostat ────────── Mirostat v2 adaptive perplexity control
+  │      (target surprise)       maintains target surprise rate τ
+  │
+  ├─ 15. Gumbel Selection ── Gumbel-Max trick with quantum noise
+  │      (Gumbel + argmax)       alternative to CDF selection
+  │
+  └─ 16. Selection ────────── top-k → softmax → top-p → CDF → select token
+       (force one-hot logits)    vLLM picks exactly this token
 ```
 
 The processor registers via Python entry points — no vLLM source code modifications needed.
@@ -73,35 +95,35 @@ The processor registers via Python entry points — no vLLM source code modifica
 
 All methods are disabled by default (control parameter = 0 or false). Enable individually or combine.
 
-### M1: Logit Noise (`qr_logit_noise_alpha`)
+### Logit Perturbation (`qr_logit_perturbation_alpha`)
 
 Adds per-logit Gaussian noise derived from quantum entropy. Fetches `vocab_size × 4` bytes, maps to zero-mean noise via the probit transform, scales by `α × σ`.
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
-| `qr_logit_noise_alpha` | `0.0` | Noise magnitude (0 = disabled) |
-| `qr_logit_noise_sigma` | `1.0` | Gaussian std before alpha scaling |
+| `qr_logit_perturbation_alpha` | `0.0` | Noise magnitude (0 = disabled) |
+| `qr_logit_perturbation_sigma` | `1.0` | Gaussian std before alpha scaling |
 
 **Impact:** Higher α broadens the effective probability distribution, increasing diversity. At α=1.0 with OpenEntropy, mean token rank shifts from ~3.1 to ~2.0.
 
-### M2: Temperature Variance (`qr_temp_variance_beta`)
+### Temperature Modulation (`qr_temp_modulation_beta`)
 
 Modulates temperature per-token using quantum entropy: `T_new = T × (1 + β × (u - 0.5))`.
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
-| `qr_temp_variance_beta` | `0.0` | Modulation magnitude (0 = disabled) |
+| `qr_temp_modulation_beta` | `0.0` | Modulation magnitude (0 = disabled) |
 
 **Impact:** β=0.5 varies temperature ±12%; β=1.5 varies ±37% (range [0.18, 1.08] at base temp 0.7).
 
-### M3: Correlated Walk (`qr_walk_step`)
+### Selection Drift (`qr_drift_step`)
 
-Maintains a per-request walk position that drifts based on quantum entropy, replacing the amplified `u` value. Creates temporal correlations across tokens within a request.
+Maintains a per-request drift position that moves based on quantum entropy, replacing the amplified `u` value. Creates temporal correlations across tokens within a request.
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
-| `qr_walk_step` | `0.0` | Step size (0 = disabled) |
-| `qr_walk_initial_position` | `0.5` | Starting position in [0, 1) |
+| `qr_drift_step` | `0.0` | Drift step size (0 = disabled) |
+| `qr_drift_initial_position` | `0.5` | Starting drift position in [0, 1) |
 
 **Impact:** step=0.05 gives mean |Δu|=0.014 (vs ~0.3 IID baseline) — strong temporal coherence. Token selections drift smoothly rather than jumping randomly.
 
@@ -128,7 +150,7 @@ Probabilistically excludes top tokens using quantum random bytes. Each token abo
 
 ### Adaptive Injection (`qr_adaptive_injection`)
 
-Scales all injection methods (M1/M2/M3) by the Shannon entropy H of the logit distribution. When the model is confident (low H), injection is suppressed; when uncertain (high H), full injection runs.
+Scales all injection methods (Logit Perturbation, Temperature Modulation, Selection Drift) by the Shannon entropy H of the logit distribution. When the model is confident (low H), injection is suppressed; when uncertain (high H), full injection runs.
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
@@ -137,6 +159,67 @@ Scales all injection methods (M1/M2/M3) by the Shannon entropy H of the logit di
 | `qr_adaptive_injection_high_h` | `3.0` | H above this → scale=1 (nats) |
 
 **Formula:** `scale = clamp((H - low_h) / (high_h - low_h), 0, 1)`
+
+### DRY Penalty (`qr_dry_multiplier`)
+
+Don't Repeat Yourself — penalizes repeated n-gram sequences to reduce degenerate repetition. Finds the longest repeated sequence in the lookback window and applies an exponential penalty.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `qr_dry_multiplier` | `0.0` | Penalty multiplier (0 = disabled) |
+| `qr_dry_base` | `1.75` | Exponential base for penalty scaling |
+| `qr_dry_allowed_length` | `2` | Min sequence length to penalize |
+| `qr_dry_penalty_last_n` | `-1` | Lookback window (-1 = full context) |
+
+### Top-N-Sigma (`qr_top_n_sigma`)
+
+Pre-softmax logit filter — keeps only tokens whose logits are within N standard deviations of the maximum logit. Removes outlier tokens before probability computation.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `qr_top_n_sigma` | `0.0` | Number of standard deviations (0 = disabled) |
+
+### Tail-Free Sampling (`qr_tfs_z`)
+
+Removes low-information probability tails using second derivatives of the sorted probability distribution. Tokens in the "tail" contribute little information and are masked out.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `qr_tfs_z` | `1.0` | Cumulative threshold on 2nd derivatives (1.0 = disabled) |
+
+### Typical Sampling (`qr_typical_p`)
+
+Locally typical sampling — keeps tokens whose surprisal (-log p) is closest to the distribution's Shannon entropy H. Tokens that are neither too surprising nor too predictable are "typical."
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `qr_typical_p` | `1.0` | Cumulative probability threshold (1.0 = disabled) |
+
+### Eta Sampling (`qr_eta_cutoff`)
+
+Entropy-aware probability cutoff — computes a dynamic threshold from the distribution's entropy and removes tokens below it. Higher-entropy distributions get a more permissive cutoff.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `qr_eta_cutoff` | `0.0` | Cutoff in 1e-4 units (0 = disabled) |
+
+### Mirostat v2 (`qr_mirostat_mode`)
+
+Adaptive perplexity control that maintains a target surprise rate τ. Adjusts the candidate set dynamically to keep per-token surprise close to the target, producing more consistent output quality.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `qr_mirostat_mode` | `0` | Mode: 0=disabled, 2=mirostat v2 |
+| `qr_mirostat_tau` | `5.0` | Target surprise rate (nats) |
+| `qr_mirostat_eta` | `0.1` | Learning rate for surprise tracking |
+
+### Gumbel-Max Selection (`qr_gumbel_selection`)
+
+Alternative to CDF-based selection — adds Gumbel noise (derived from quantum entropy) to log-probabilities and selects via argmax. Provides a mathematically equivalent but structurally different selection mechanism.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `qr_gumbel_selection` | `false` | Enable Gumbel-Max selection |
 
 ---
 
@@ -245,9 +328,9 @@ curl http://localhost:8000/v1/completions \
       "qr_xtc_probability": 0.5,
       "qr_xtc_threshold": 0.1,
       "qr_adaptive_injection": true,
-      "qr_logit_noise_alpha": 0.3,
-      "qr_temp_variance_beta": 0.5,
-      "qr_walk_step": 0.05,
+      "qr_logit_perturbation_alpha": 0.3,
+      "qr_temp_modulation_beta": 0.5,
+      "qr_drift_step": 0.05,
       "qr_diagnostic_mode": true
     }
   }'
@@ -274,36 +357,36 @@ curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
 }'
 ```
 
-**M1 — Logit Noise:**
+**Logit Perturbation:**
 
 ```bash
 curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
   "model": "'"$MODEL"'",
   "prompt": "The nature of consciousness is",
   "max_tokens": 100,
-  "extra_args": { "qr_logit_noise_alpha": 0.3 }
+  "extra_args": { "qr_logit_perturbation_alpha": 0.3 }
 }'
 ```
 
-**M2 — Temperature Variance:**
+**Temperature Modulation:**
 
 ```bash
 curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
   "model": "'"$MODEL"'",
   "prompt": "The nature of consciousness is",
   "max_tokens": 100,
-  "extra_args": { "qr_temp_variance_beta": 0.5 }
+  "extra_args": { "qr_temp_modulation_beta": 0.5 }
 }'
 ```
 
-**M3 — Correlated Walk:**
+**Selection Drift:**
 
 ```bash
 curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
   "model": "'"$MODEL"'",
   "prompt": "The nature of consciousness is",
   "max_tokens": 100,
-  "extra_args": { "qr_walk_step": 0.05 }
+  "extra_args": { "qr_drift_step": 0.05 }
 }'
 ```
 
@@ -329,7 +412,7 @@ curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
 }'
 ```
 
-**Adaptive Injection + M1:**
+**Adaptive Injection + Logit Perturbation:**
 
 ```bash
 curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
@@ -340,7 +423,7 @@ curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
     "qr_adaptive_injection": true,
     "qr_adaptive_injection_low_h": 1.0,
     "qr_adaptive_injection_high_h": 3.0,
-    "qr_logit_noise_alpha": 0.5
+    "qr_logit_perturbation_alpha": 0.5
   }
 }'
 ```
@@ -354,9 +437,9 @@ curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
   "max_tokens": 100,
   "extra_args": {
     "qr_adaptive_injection": true,
-    "qr_logit_noise_alpha": 0.3,
-    "qr_temp_variance_beta": 0.5,
-    "qr_walk_step": 0.05,
+    "qr_logit_perturbation_alpha": 0.3,
+    "qr_temp_modulation_beta": 0.5,
+    "qr_drift_step": 0.05,
     "qr_min_p": 0.1,
     "qr_xtc_probability": 0.3,
     "qr_xtc_threshold": 0.1
@@ -367,9 +450,9 @@ curl "$VLLM_URL" -H "Content-Type: application/json" -d '{
 To set methods process-wide (instead of per request):
 
 ```bash
-export QR_LOGIT_NOISE_ALPHA=0.3
-export QR_TEMP_VARIANCE_BETA=0.5
-export QR_WALK_STEP=0.05
+export QR_LOGIT_PERTURBATION_ALPHA=0.3
+export QR_TEMP_MODULATION_BETA=0.5
+export QR_DRIFT_STEP=0.05
 export QR_MIN_P=0.1
 export QR_XTC_PROBABILITY=0.3
 export QR_XTC_THRESHOLD=0.1
@@ -423,7 +506,7 @@ All configuration is done via environment variables with the `QR_` prefix. Per-r
 
 | Environment variable | Default | Description |
 |---|---|---|
-| `QR_ENTROPY_SOURCE_TYPE` | `system` | Primary entropy source: `system`, `quantum_grpc`, `openentropy`, `timing_noise`, `mock_uniform` |
+| `QR_ENTROPY_SOURCE_TYPE` | `system` | Primary entropy source: `system`, `quantum_grpc`, `openentropy`, `timing_noise`, `mock_uniform`, `sham_qrng` |
 | `QR_GRPC_SERVER_ADDRESS` | `localhost:50051` | gRPC entropy server address (`host:port` or `unix:///path`) |
 | `QR_GRPC_TIMEOUT_MS` | `5000` | gRPC call timeout in milliseconds |
 | `QR_GRPC_RETRY_COUNT` | `2` | Retry attempts after gRPC failure |
@@ -441,12 +524,19 @@ All configuration is done via environment variables with the `QR_` prefix. Per-r
 | `QR_CB_TIMEOUT_MULTIPLIER` | `1.5` | Multiplier applied to P99 latency for adaptive timeout |
 | `QR_CB_RECOVERY_WINDOW_S` | `10.0` | Seconds before half-open retry after circuit opens |
 | `QR_CB_MAX_CONSECUTIVE_FAILURES` | `3` | Consecutive failures before circuit breaker opens |
+| `QR_GRPC_TLS_ENABLED` | `false` | Enable TLS for gRPC connections |
+| `QR_GRPC_TLS_CA_CERT` | *(empty)* | Path to CA certificate for TLS verification |
+| `QR_GRPC_TLS_CLIENT_CERT` | *(empty)* | Path to client certificate for mutual TLS |
+| `QR_GRPC_TLS_CLIENT_KEY` | *(empty)* | Path to client key for mutual TLS |
+| `QR_ECDF_CALIBRATION_SAMPLES` | `2000` | Number of calibration samples for ECDF amplifier |
+| `QR_SHAM_QRNG_LATENCY_MS` | `0.0` | Simulated QRNG latency for sham source (ms) |
+| `QR_OE_CONDITIONING` | `raw` | OpenEntropy conditioning: `raw`, `sha256`, `vonneumann` |
 
 ### Sampling parameters (per-request overridable)
 
 | Environment variable | extra_args key | Default | Description |
 |---|---|---|---|
-| `QR_SIGNAL_AMPLIFIER_TYPE` | `qr_signal_amplifier_type` | `zscore_mean` | Signal amplification algorithm |
+| `QR_SIGNAL_AMPLIFIER_TYPE` | `qr_signal_amplifier_type` | `zscore_mean` | Signal amplification: `zscore_mean` or `ecdf` |
 | `QR_SAMPLE_COUNT` | `qr_sample_count` | `20480` | Entropy bytes fetched per token |
 | `QR_POPULATION_MEAN` | `qr_population_mean` | `127.5` | Null-hypothesis mean for byte values |
 | `QR_POPULATION_STD` | `qr_population_std` | `73.612...` | Population std for uniform [0, 255] |
@@ -465,12 +555,26 @@ All configuration is done via environment variables with the `QR_` prefix. Per-r
 | `QR_ADAPTIVE_INJECTION` | `qr_adaptive_injection` | `false` | Scale injection by distribution entropy |
 | `QR_ADAPTIVE_INJECTION_LOW_H` | `qr_adaptive_injection_low_h` | `1.0` | Entropy below this → injection suppressed (nats) |
 | `QR_ADAPTIVE_INJECTION_HIGH_H` | `qr_adaptive_injection_high_h` | `3.0` | Entropy above this → full injection (nats) |
-| `QR_LOGIT_NOISE_ALPHA` | `qr_logit_noise_alpha` | `0.0` | M1: Logit noise magnitude (`0` disables) |
-| `QR_LOGIT_NOISE_SIGMA` | `qr_logit_noise_sigma` | `1.0` | M1: Gaussian std dev before alpha scaling |
-| `QR_TEMP_VARIANCE_BETA` | `qr_temp_variance_beta` | `0.0` | M2: Temperature modulation magnitude (`0` disables) |
-| `QR_WALK_STEP` | `qr_walk_step` | `0.0` | M3: Correlated walk step size (`0` disables) |
-| `QR_WALK_INITIAL_POSITION` | `qr_walk_initial_position` | `0.5` | M3: Initial walk position in `[0, 1)` |
-| `QR_OE_CONDITIONING` | `qr_oe_conditioning` | `raw` | OpenEntropy conditioning: `raw`, `sha256`, `vonneumann` |
+| `QR_LOGIT_PERTURBATION_ALPHA` | `qr_logit_perturbation_alpha` | `0.0` | Logit perturbation magnitude (`0` disables) |
+| `QR_LOGIT_PERTURBATION_SIGMA` | `qr_logit_perturbation_sigma` | `1.0` | Gaussian std dev before alpha scaling |
+| `QR_TEMP_MODULATION_BETA` | `qr_temp_modulation_beta` | `0.0` | Temperature modulation magnitude (`0` disables) |
+| `QR_DRIFT_STEP` | `qr_drift_step` | `0.0` | Selection drift step size (`0` disables) |
+| `QR_DRIFT_INITIAL_POSITION` | `qr_drift_initial_position` | `0.5` | Initial drift position in `[0, 1)` |
+| `QR_TOP_N_SIGMA` | `qr_top_n_sigma` | `0.0` | Keep logits within N sigma of max (`0` disables) |
+| `QR_TFS_Z` | `qr_tfs_z` | `1.0` | Tail-free sampling z threshold (`1.0` disables) |
+| `QR_TYPICAL_P` | `qr_typical_p` | `1.0` | Locally typical sampling threshold (`1.0` disables) |
+| `QR_ETA_CUTOFF` | `qr_eta_cutoff` | `0.0` | Eta sampling cutoff in 1e-4 units (`0` disables) |
+| `QR_DRY_MULTIPLIER` | `qr_dry_multiplier` | `0.0` | DRY repetition penalty multiplier (`0` disables) |
+| `QR_DRY_BASE` | `qr_dry_base` | `1.75` | DRY penalty base for exponential scaling |
+| `QR_DRY_ALLOWED_LENGTH` | `qr_dry_allowed_length` | `2` | DRY minimum repeated sequence length to penalize |
+| `QR_DRY_PENALTY_LAST_N` | `qr_dry_penalty_last_n` | `-1` | DRY lookback window in tokens (`-1` = full context) |
+| `QR_DRY_SEQUENCE_BREAKERS` | `qr_dry_sequence_breakers` | *(empty)* | Comma-separated integer token IDs that break DRY sequence matching |
+| `QR_MIROSTAT_MODE` | `qr_mirostat_mode` | `0` | Mirostat mode: `0`=disabled, `2`=mirostat v2 |
+| `QR_MIROSTAT_TAU` | `qr_mirostat_tau` | `5.0` | Mirostat target surprise rate (nats) |
+| `QR_MIROSTAT_ETA` | `qr_mirostat_eta` | `0.1` | Mirostat learning rate |
+| `QR_GUMBEL_SELECTION` | `qr_gumbel_selection` | `false` | Use Gumbel-Max selection instead of CDF binary search |
+| `QR_ENTROPIX_VARENTROPY` | `qr_entropix_varentropy` | `false` | Enable varentropy-based regime switching |
+| `QR_ENTROPIX_VARENTROPY_THRESH` | `qr_entropix_varentropy_thresh` | `3.0` | Varentropy threshold for "confused" regime (nats^2) |
 | `QR_INJECTION_VERBOSE` | `qr_injection_verbose` | `false` | Log per-token injection diagnostics at debug level |
 | `QR_LOG_LEVEL` | `qr_log_level` | `summary` | Logging: `none`, `summary`, `full` |
 | `QR_DIAGNOSTIC_MODE` | `qr_diagnostic_mode` | `false` | Store all token records in memory |
@@ -490,6 +594,7 @@ You can also use a `.env` file — pydantic-settings loads it automatically.
 | **OpenEntropy** | `openentropy` | 58+ hardware noise sources (thermal, timing, microarch) — local, no network |
 | **Timing noise** | `timing_noise` | CPU timing jitter (experimental) |
 | **Mock uniform** | `mock_uniform` | Configurable test source with seed/bias |
+| **Sham QRNG** | `sham_qrng` | `os.urandom()` + tunable latency for double-blind controls |
 
 ### OpenEntropy
 
@@ -645,14 +750,21 @@ Each stage reads from and writes to a shared `SamplingContext` — a mutable dat
 | # | Stage | What it does |
 |---|-------|-------------|
 | 1 | `adaptive_injection` | Sets `ctx.injection_scale` from logit entropy |
-| 2 | `logit_noise` | M1: adds quantum noise to logits |
-| 3 | `temperature` | Computes temperature via strategy |
-| 4 | `temp_variance` | M2: modulates temperature with quantum entropy |
-| 5 | `min_p` | Removes low-probability tokens |
-| 6 | `xtc` | Quantum coin-flip top-token exclusion |
-| 7 | `entropy_fetch` | Fetches bytes + amplifies to u ∈ (0,1) |
-| 8 | `correlated_walk` | M3: drifts selection point |
-| 9 | `selection` | CDF-based token selection + one-hot forcing |
+| 2 | `logit_perturbation` | Adds quantum noise to logits |
+| 3 | `dry` | DRY n-gram repetition penalty |
+| 4 | `top_n_sigma` | Keep logits within N sigma of max (pre-softmax) |
+| 5 | `temperature` | Computes temperature via strategy |
+| 6 | `temp_modulation` | Modulates temperature with quantum entropy |
+| 7 | `min_p` | Removes low-probability tokens |
+| 8 | `tfs` | Tail-free sampling via second derivatives |
+| 9 | `typical` | Locally typical sampling (near expected surprisal) |
+| 10 | `eta` | Entropy-aware probability cutoff |
+| 11 | `xtc` | Quantum coin-flip top-token exclusion |
+| 12 | `entropy_fetch` | Fetches bytes + amplifies to u ∈ (0,1) |
+| 13 | `selection_drift` | Drifts selection point with temporal memory |
+| 14 | `mirostat` | Mirostat v2 adaptive perplexity control |
+| 15 | `gumbel_selection` | Gumbel-Max trick with quantum noise |
+| 16 | `selection` | CDF-based token selection + one-hot forcing |
 
 ### Custom pipelines
 
@@ -684,9 +796,9 @@ Pre-configured experiment files live in `experiments/`:
 ```
 experiments/
 ├── baseline.yaml              # No injection — control condition
-├── m1_logit_noise.yaml        # M1 at multiple alpha values
-├── m2_temp_variance.yaml      # M2 at multiple beta values
-├── m3_correlated_walk.yaml    # M3 at multiple step sizes
+├── logit_perturbation.yaml    # Logit perturbation at multiple alpha values
+├── temp_modulation.yaml       # Temperature modulation at multiple beta values
+├── selection_drift.yaml       # Selection drift at multiple step sizes
 ├── min_p_filtering.yaml       # Min-P at multiple thresholds
 ├── xtc_quantum.yaml           # XTC at multiple probabilities
 ├── adaptive_injection.yaml    # Adaptive with different H bands
@@ -917,23 +1029,32 @@ src/qr_sampler/
 ├── stages/
 │   ├── _utils.py                  # Shared stable_softmax(), shannon_entropy
 │   ├── adaptive_injection.py      # Entropy-aware injection scaling
-│   ├── logit_noise.py             # M1: per-logit quantum noise stage
+│   ├── logit_perturbation.py       # Per-logit quantum noise stage
+│   ├── dry.py                     # DRY n-gram repetition penalty
+│   ├── top_n_sigma.py             # Top-N-Sigma logit filtering (pre-softmax)
 │   ├── temperature.py             # Temperature computation stage
-│   ├── temp_variance.py           # M2: quantum temperature modulation stage
+│   ├── temp_modulation.py          # Quantum temperature modulation stage
 │   ├── min_p.py                   # Min-P probability floor stage
+│   ├── tfs.py                     # Tail-free sampling via second derivatives
+│   ├── typical.py                 # Locally typical sampling
+│   ├── eta.py                     # Entropy-aware probability cutoff
 │   ├── xtc.py                     # XTC quantum top-token exclusion stage
 │   ├── entropy_fetch.py           # JIT entropy fetch + amplification stage
-│   ├── correlated_walk.py         # M3: correlated walk stage
+│   ├── selection_drift.py          # Selection drift stage
+│   ├── mirostat.py                # Mirostat v2 adaptive perplexity control
+│   ├── gumbel_selection.py        # Gumbel-Max quantum selection
 │   └── selection.py               # CDF token selection stage
 ├── injection/
 │   ├── _entropy_utils.py          # bytes_to_uniform() helper
-│   ├── logit_noise.py             # M1: Gaussian noise utility
-│   ├── temp_variance.py           # M2: temperature modulation utility
-│   └── correlated_walk.py         # M3: walk position utility
+│   ├── logit_perturbation.py       # Gaussian noise utility
+│   ├── temp_modulation.py          # Temperature modulation utility
+│   └── selection_drift.py          # Drift position utility
 ├── amplification/
 │   ├── base.py                    # SignalAmplifier ABC, AmplificationResult
 │   ├── registry.py                # AmplifierRegistry
-│   └── zscore.py                  # Z-score mean amplifier
+│   ├── zscore.py                  # Z-score mean amplifier
+│   ├── ecdf.py                    # ECDF-based amplifier
+│   └── calibration.py             # Population stats calibration utilities
 ├── entropy/
 │   ├── base.py                    # EntropySource ABC
 │   ├── registry.py                # Auto-discovery registry + entry points
@@ -942,7 +1063,17 @@ src/qr_sampler/
 │   ├── system.py                  # os.urandom() source
 │   ├── timing.py                  # CPU timing jitter source
 │   ├── mock.py                    # Configurable test source
+│   ├── sham.py                    # Simulated QRNG with tunable latency
 │   └── fallback.py                # Fallback wrapper
+├── analysis/
+│   ├── persistence.py             # JSONL save/load for TokenSamplingRecords
+│   ├── statistics.py              # 9 statistical tests (bias, uniformity, etc.)
+│   └── compare.py                 # Two-sample comparison utilities
+├── adapters/
+│   ├── _base.py                   # AdapterComponents shared base
+│   ├── transformers.py            # HuggingFace Transformers adapter
+│   ├── llamacpp.py                # llama.cpp Python adapter
+│   └── sglang.py                  # SGLang adapter
 ├── logging/
 │   ├── types.py                   # TokenSamplingRecord dataclass
 │   └── logger.py                  # SamplingLogger (none/summary/full)
@@ -960,9 +1091,6 @@ src/qr_sampler/
     └── edt.py                     # Entropy-dependent temperature
 
 experiments/                       # Pre-configured experiment presets
-scripts/
-├── injection_mode_test.py         # M1/M2/M3 comparison script
-└── openentropy_mode_test.py       # Full-mode test with OpenEntropy
 
 examples/
 ├── servers/
@@ -1013,7 +1141,7 @@ git clone https://github.com/ereid7/Quantum-random-vLLM-sampler.git
 cd Quantum-random-vLLM-sampler
 pip install -e ".[dev]"
 
-# Run tests (537 tests)
+# Run tests (774 tests)
 pytest tests/ -v
 
 # Lint and format
@@ -1036,7 +1164,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
 This project is forked from [alchemystack/Quantum-random-vLLM-sampler](https://github.com/alchemystack/Quantum-random-vLLM-sampler). The original project by [alchemystack](https://github.com/alchemystack) established the core architecture: entropy source abstraction, signal amplification via z-score statistics, CDF-based token selection, and the gRPC transport layer.
 
-This fork adds the pipeline-as-stages architecture, injection methods (M1/M2/M3, Min-P, XTC, Adaptive Injection), OpenEntropy integration, experiment presets, and expanded test coverage.
+This fork adds the pipeline-as-stages architecture, injection methods (Logit Perturbation, Temperature Modulation, Selection Drift, Min-P, XTC, Adaptive Injection), OpenEntropy integration, experiment presets, and expanded test coverage.
 
 ## License
 

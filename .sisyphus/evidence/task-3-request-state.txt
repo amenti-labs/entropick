@@ -1,2 +1,0 @@
-walk_position in __slots__: True
-walk_position in __init__ signature: True

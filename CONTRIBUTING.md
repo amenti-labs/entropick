@@ -1,104 +1,83 @@
 # Contributing to qr-sampler
 
-Thank you for your interest in contributing to qr-sampler. This document covers everything you need to get started.
-
 ## Development setup
 
-### Prerequisites
-
-- Python 3.10 or later
-- Git
-
-### Install
-
 ```bash
-git clone https://github.com/qr-sampler/qr-sampler.git
-cd qr-sampler
+git clone https://github.com/ereid7/Quantum-random-vLLM-sampler.git
+cd Quantum-random-vLLM-sampler
 pip install -e ".[dev]"
-```
-
-This installs the package in editable mode with all development dependencies (pytest, ruff, mypy, scipy, pre-commit, bandit, gRPC).
-
-### Pre-commit hooks
-
-```bash
 pre-commit install
 ```
 
-This runs ruff (lint + format), mypy, bandit, and standard checks (trailing whitespace, YAML/TOML validation, merge conflict detection) on every commit.
+This installs the package in editable mode with all dev dependencies (pytest, ruff, mypy,
+scipy, pre-commit, bandit, gRPC) and sets up pre-commit hooks.
 
 ## Running tests
 
 ```bash
-# All tests
+# Full suite
 pytest tests/ -v
 
-# Specific subsystem
+# With coverage
+pytest tests/ -v --cov=src/qr_sampler --cov-report=term-missing
+
+# Specific modules
 pytest tests/test_config.py -v
 pytest tests/test_amplification/ -v
 pytest tests/test_temperature/ -v
 pytest tests/test_selection/ -v
 pytest tests/test_logging/ -v
 pytest tests/test_entropy/ -v
-
-# With coverage
-pytest tests/ -v --cov=src/qr_sampler --cov-report=term-missing
+pytest tests/test_injection/ -v
+pytest tests/test_pipeline/ -v
+pytest tests/test_analysis/ -v
+pytest tests/test_adapters/ -v
+pytest tests/test_processor.py -v
+pytest tests/test_contracts.py -v
+pytest tests/test_statistical_properties.py -v
 ```
 
-Coverage must stay at or above 90%.
+No real QRNG server or GPU is needed. Tests use `MockUniformSource` and numpy arrays.
+Statistical tests in `test_statistical_properties.py` require `scipy` (included in dev deps).
 
-## Code quality checks
+## Linting and type checking
+
+All three must pass before merging:
 
 ```bash
-# Lint
 ruff check src/ tests/
-
-# Auto-fix lint issues
-ruff check --fix src/ tests/
-
-# Format check
 ruff format --check src/ tests/
-
-# Auto-format
-ruff format src/ tests/
-
-# Type check
 mypy --strict src/
-
-# Security scan
-bandit -r src/
 ```
 
-## Coding conventions
+Fix formatting automatically with `ruff format src/ tests/`.
+Fix auto-fixable lint issues with `ruff check --fix src/ tests/`.
 
-- **Python 3.10+** — use `X | Y` union syntax, not `Union[X, Y]`
+## Code conventions
+
+- **Python 3.10+** -- use `X | Y` union syntax, not `Union[X, Y]`
 - **Type hints** on all function signatures and return types
-- **Docstrings** — Google style on every public class and method
-- **Imports** — standard library first, third-party second, local third. No wildcard imports.
-- **Line length** — 100 characters (configured in `pyproject.toml`)
-- **Errors** — custom exception hierarchy rooted in `QRSamplerError`. Never catch bare `Exception` (health checks are the sole exception with `# noqa` comments).
-- **No `print()`** — use `logging.getLogger("qr_sampler")` for all output
-- **No global mutable state** outside processor instances and module-load registries
-- **Frozen dataclasses** for all result types (`AmplificationResult`, `TemperatureResult`, `SelectionResult`, `TokenSamplingRecord`)
-- **`__slots__`** on frozen dataclasses in the hot path
-
-## Architecture invariants
-
-These are fundamental design rules. Do not break them:
-
-1. **No hardcoded values.** Every numeric constant traces to a `QRSamplerConfig` field. Mathematical constants (e.g., `sqrt(2)`) are acceptable.
-
-2. **Registry pattern for all strategies.** New `EntropySource`, `SignalAmplifier`, or `TemperatureStrategy` implementations are registered via decorators. No if/else chains for strategy selection.
-
-3. **ABCs define contracts.** All concrete implementations subclass the relevant ABC. The processor and factory only reference abstract types.
-
-4. **SEM is derived, never stored.** Standard error of mean = `population_std / sqrt(sample_count)`, computed at amplification time.
-
-5. **Per-request config is immutable.** `resolve_config()` creates new instances; it never mutates defaults. Infrastructure fields cannot be overridden per-request.
-
-6. **Just-in-time entropy.** Physical entropy generation must occur only when `get_random_bytes()` is called — after logits are available. No pre-buffering.
+- **Google-style docstrings** on every public class and method
+- **100-character line length** (configured in `pyproject.toml`)
+- **Imports** -- stdlib first, third-party second, local third; no wildcard imports
+- **Custom exceptions** rooted in `QRSamplerError` (see `exceptions.py`); never catch bare `Exception`
+- **No `print()`** -- use `logging.getLogger("qr_sampler")`
+- **No global mutable state** outside processor instances
+- **Frozen dataclasses** with `__slots__` for all result types
+- **`QR_` prefix** for environment variables, `qr_` prefix for `extra_args` keys
 
 ## Adding new components
+
+See `CLAUDE.md` for the full file map, architecture invariants, and data flow diagrams.
+
+### New pipeline stage
+
+1. Create a class in `src/qr_sampler/stages/` with `name: str` and `__call__(self, ctx: SamplingContext) -> None`
+2. Register with `@StageRegistry.register("my_stage")`
+3. Add config fields to `QRSamplerConfig` and `_PER_REQUEST_FIELDS` if needed
+4. Add to `build_default_pipeline()` in `src/qr_sampler/stages/__init__.py` at the appropriate position
+5. Add entry point in `pyproject.toml` under `[project.entry-points."qr_sampler.pipeline_stages"]`
+6. Add tests in `tests/test_pipeline/`
 
 ### New entropy source
 
@@ -113,45 +92,63 @@ These are fundamental design rules. Do not break them:
 
 1. Create a class in `src/qr_sampler/amplification/` subclassing `SignalAmplifier`
 2. Implement `amplify(raw_bytes) -> AmplificationResult`
-3. Register with `@AmplifierRegistry.register("my_name")`
-4. Add tests in `tests/test_amplification/`
+3. Constructor takes `config: QRSamplerConfig` as first arg
+4. Register with `@AmplifierRegistry.register("my_name")`
+5. Add tests in `tests/test_amplification/`
 
 ### New temperature strategy
 
 1. Create a class in `src/qr_sampler/temperature/` subclassing `TemperatureStrategy`
 2. Implement `compute_temperature(logits, config) -> TemperatureResult`
-3. Always compute and return Shannon entropy (the logging subsystem depends on it)
-4. Register with `@TemperatureStrategyRegistry.register("my_name")`
-5. Add tests in `tests/test_temperature/`
+3. Always compute and return `shannon_entropy` (logging depends on it)
+4. If the constructor needs `vocab_size`, accept it as first positional arg
+5. Register with `@TemperatureStrategyRegistry.register("my_name")`
+6. Add tests in `tests/test_temperature/`
+
+### New injection method
+
+Injection methods are stateless utility classes (not registered via the registry pattern).
+See the "New injection method" section in `CLAUDE.md` for the full walkthrough.
 
 ### New config field
 
-1. Add the field to `QRSamplerConfig` in `config.py` with a default and description
-2. If per-request overridable, add to `_PER_REQUEST_FIELDS`
-3. Environment variable `QR_{FIELD_NAME_UPPER}` is auto-supported
-4. Extra args key `qr_{field_name}` is auto-supported
-5. Add tests in `tests/test_config.py`
+1. Add the field to `QRSamplerConfig` in `config.py` with `Field(default=..., description=...)`
+2. If per-request overridable, add to `_PER_REQUEST_FIELDS` frozenset
+3. Env var `QR_{FIELD_NAME_UPPER}` and extra_args key `qr_{field_name}` are auto-supported
+4. Add tests in `tests/test_config.py`
 
-## Pull request process
+## Architecture invariants
 
-1. Fork the repository and create a branch from `main`
-2. Make your changes, following the coding conventions above
-3. Add or update tests for your changes
-4. Run the full quality gate:
+Do not break these (see `CLAUDE.md` for the full list):
+
+- **No hardcoded values** -- every constant traces to a named field in `QRSamplerConfig`
+- **Registry pattern** for amplifiers, temperature strategies, and entropy sources
+- **Frozen dataclasses** for all result types
+- **Per-request config** never mutates the default config instance
+- **SEM is derived** (`population_std / sqrt(N)`), never stored as a config field
+- **One-hot forcing** -- after selection, all logits are `-inf` except the chosen token (`0.0`)
+- **Just-in-time entropy** -- no pre-buffering or caching of random bytes
+
+## Pull request guidelines
+
+1. **Tests required** -- every PR must include tests for new functionality
+2. **Lint must pass** -- `ruff check` and `ruff format --check` with zero warnings
+3. **Types must pass** -- `mypy --strict src/` with zero errors
+4. **Keep PRs focused** -- one feature or fix per PR
+5. **Describe the change** -- explain *why*, not just *what*
+6. **Update CLAUDE.md** if you change the file map, architecture, or public API
+7. Run the full quality gate before submitting:
    ```bash
    ruff check src/ tests/ && ruff format --check src/ tests/ && mypy --strict src/ && pytest tests/ -v
    ```
-5. Write a clear PR description explaining *what* and *why*
-6. Submit the PR for review
 
-## Reporting bugs
+## Pre-commit hooks
 
-Open an issue with:
-- What you expected to happen
-- What actually happened
-- Steps to reproduce
-- Python version, OS, vLLM version
-- Relevant configuration (`QR_*` env vars)
+```bash
+pre-commit run --all-files
+```
+
+Hooks run ruff (lint + format), mypy, and bandit automatically on staged files.
 
 ## License
 

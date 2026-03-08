@@ -41,15 +41,29 @@ _PER_REQUEST_FIELDS: frozenset[str] = frozenset(
         "adaptive_injection",
         "adaptive_injection_low_h",
         "adaptive_injection_high_h",
+        "mirostat_mode",
+        "mirostat_tau",
+        "mirostat_eta",
+        "top_n_sigma",
+        "tfs_z",
+        "typical_p",
+        "eta_cutoff",
+        "dry_multiplier",
+        "dry_base",
+        "dry_allowed_length",
+        "dry_penalty_last_n",
+        "dry_sequence_breakers",
+        "entropix_varentropy",
+        "entropix_varentropy_thresh",
+        "gumbel_selection",
         "log_level",
         "diagnostic_mode",
-        "logit_noise_alpha",
-        "logit_noise_sigma",
-        "temp_variance_beta",
-        "walk_step",
-        "walk_initial_position",
+        "logit_perturbation_alpha",
+        "logit_perturbation_sigma",
+        "temp_modulation_beta",
+        "drift_step",
+        "drift_initial_position",
         "injection_verbose",
-        "oe_conditioning",
     }
 )
 
@@ -109,6 +123,22 @@ class QRSamplerConfig(BaseSettings):
     grpc_api_key_header: str = Field(
         default="api-key",
         description="gRPC metadata header name for the API key",
+    )
+    grpc_tls_enabled: bool = Field(
+        default=False,
+        description="Enable TLS for gRPC channel (use secure_channel instead of insecure_channel)",
+    )
+    grpc_tls_ca_cert: str = Field(
+        default="",
+        description="Path to CA certificate PEM file for TLS verification",
+    )
+    grpc_tls_client_cert: str = Field(
+        default="",
+        description="Path to client certificate PEM file for mutual TLS (mTLS)",
+    )
+    grpc_tls_client_key: str = Field(
+        default="",
+        description="Path to client private key PEM file for mutual TLS (mTLS)",
     )
     fallback_mode: str = Field(
         default="system",
@@ -252,35 +282,142 @@ class QRSamplerConfig(BaseSettings):
         allow_inf_nan=False,
     )
 
+    # --- Mirostat (per-request overridable) ---
+
+    mirostat_mode: int = Field(
+        default=0,
+        description="Mirostat mode: 0=disabled, 2=mirostat v2",
+        ge=0,
+        le=2,
+    )
+    mirostat_tau: float = Field(
+        default=5.0,
+        description="Mirostat target surprise rate (nats)",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    mirostat_eta: float = Field(
+        default=0.1,
+        description="Mirostat learning rate",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    # --- Additional filtering stages (per-request overridable) ---
+
+    top_n_sigma: float = Field(
+        default=0.0,
+        description="Top-n-sigma: keep logits within n std of max. 0 = disabled.",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    tfs_z: float = Field(
+        default=1.0,
+        description="Tail-free sampling z threshold. 1.0 = disabled.",
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    typical_p: float = Field(
+        default=1.0,
+        description="Locally typical sampling threshold. 1.0 = disabled.",
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    eta_cutoff: float = Field(
+        default=0.0,
+        description="Eta sampling cutoff (in 1e-4 units). 0 = disabled.",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    # --- DRY penalty (per-request overridable) ---
+
+    dry_multiplier: float = Field(
+        default=0.0,
+        description="DRY repetition penalty multiplier. 0 = disabled.",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    dry_base: float = Field(
+        default=1.75,
+        description="DRY penalty base for exponential scaling.",
+        ge=1.0,
+        allow_inf_nan=False,
+    )
+    dry_allowed_length: int = Field(
+        default=2,
+        description="DRY minimum repeated sequence length to penalize.",
+        ge=1,
+    )
+    dry_penalty_last_n: int = Field(
+        default=-1,
+        description="DRY lookback window in tokens. -1 = full context.",
+    )
+    dry_sequence_breakers: str = Field(
+        default="",
+        description="Comma-separated integer token IDs that break DRY sequence matching.",
+    )
+
+    # --- Entropix / varentropy (per-request overridable) ---
+
+    entropix_varentropy: bool = Field(
+        default=False,
+        description="Enable varentropy-based regime switching (extends adaptive injection).",
+    )
+    entropix_varentropy_thresh: float = Field(
+        default=3.0,
+        description="Varentropy threshold for 'confused' regime (nats^2).",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    # --- Gumbel selection (per-request overridable) ---
+
+    gumbel_selection: bool = Field(
+        default=False,
+        description="Use Gumbel-Max selection instead of CDF binary search.",
+    )
+
+    # --- Sham QRNG (infrastructure — latency set at init) ---
+
+    sham_qrng_latency_ms: float = Field(
+        default=0.0,
+        description="Simulate QRNG latency with os.urandom (ms). 0 = disabled. For controls.",
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
     # --- Injection methods (per-request overridable) ---
 
-    logit_noise_alpha: float = Field(
+    logit_perturbation_alpha: float = Field(
         default=0.0,
-        description="M1: Logit noise magnitude. 0 = disabled.",
+        description="Logit perturbation magnitude. 0 = disabled.",
         ge=0.0,
         allow_inf_nan=False,
     )
-    logit_noise_sigma: float = Field(
+    logit_perturbation_sigma: float = Field(
         default=1.0,
-        description="M1: Standard deviation of noise before scaling by alpha.",
+        description="Logit perturbation: standard deviation of noise before scaling by alpha.",
         ge=0.0,
         allow_inf_nan=False,
     )
-    temp_variance_beta: float = Field(
+    temp_modulation_beta: float = Field(
         default=0.0,
-        description="M2: Temperature modulation magnitude. 0 = disabled.",
+        description="Temperature modulation magnitude. 0 = disabled.",
         ge=0.0,
         allow_inf_nan=False,
     )
-    walk_step: float = Field(
+    drift_step: float = Field(
         default=0.0,
-        description="M3: Correlated walk step size. 0 = disabled.",
+        description="Selection drift step size. 0 = disabled.",
         ge=0.0,
         allow_inf_nan=False,
     )
-    walk_initial_position: float = Field(
+    drift_initial_position: float = Field(
         default=0.5,
-        description="M3: Initial walk position in [0, 1).",
+        description="Selection drift initial position in [0, 1).",
         ge=0.0,
         lt=1.0,
         allow_inf_nan=False,
@@ -300,7 +437,7 @@ class QRSamplerConfig(BaseSettings):
         description="Store all token records in memory for analysis",
     )
 
-    # --- OpenEntropy (oe_conditioning per-request, others infrastructure) ---
+    # --- OpenEntropy (all infrastructure — source constructed at init) ---
 
     oe_conditioning: str = Field(
         default="raw",

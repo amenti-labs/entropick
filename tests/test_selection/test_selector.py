@@ -134,11 +134,10 @@ class TestTokenSelector:
         assert "effective_top_p_candidates" in result.diagnostics
         assert "u" in result.diagnostics
 
-    def test_probability_sums_to_one_after_selection(self, selector: TokenSelector) -> None:
-        """The probabilities of all candidates should sum to ~1.0."""
+    def test_selected_token_prob_is_valid(self, selector: TokenSelector) -> None:
+        """Selected token probability should be positive and in range."""
         logits = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
         result = selector.select(logits, temperature=1.0, top_k=0, top_p=1.0, u=0.5)
-        # token_prob is one candidate's probability — it should be > 0 and < 1.
         assert 0.0 < result.token_prob <= 1.0
 
 

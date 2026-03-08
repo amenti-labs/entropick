@@ -68,8 +68,13 @@ def compute_shannon_entropy(logits: FloatArray) -> float:
     Returns:
         Shannon entropy in nats (natural log base).
     """
+    # Guard against all-inf inputs (e.g., every token masked by prior stages).
+    finite_mask = np.isfinite(logits)
+    if not np.any(finite_mask):
+        return 0.0
+
     # Numerically stable softmax: shift by max to prevent overflow.
-    shifted = logits - np.max(logits)
+    shifted = logits - np.max(logits[finite_mask])
     exp_shifted = np.exp(shifted)
     sum_exp = np.sum(exp_shifted)
 

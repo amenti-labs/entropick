@@ -27,7 +27,20 @@ from qr_sampler.temperature.base import TemperatureResult, TemperatureStrategy
 _SIMPLE_ENTROPY_SOURCES: list[tuple[str, type[EntropySource]]] = []
 
 
-def _collect_entropy_sources() -> list[tuple[str, type[EntropySource]]]:
+def _sham_factory() -> EntropySource:
+    """Create a fresh ShamQrngSource for testing."""
+    from qr_sampler.entropy.sham import ShamQrngSource
+
+    sham_config = QRSamplerConfig(
+        entropy_source_type="sham_qrng",
+        fallback_mode="error",
+        log_level="none",
+        sham_qrng_latency_ms=0.0,
+    )
+    return ShamQrngSource(sham_config)
+
+
+def _collect_entropy_sources() -> list[tuple[str, type[EntropySource] | callable]]:
     """Collect entropy sources that can be tested without external deps."""
     from qr_sampler.entropy.mock import MockUniformSource
     from qr_sampler.entropy.system import SystemEntropySource
@@ -37,14 +50,15 @@ def _collect_entropy_sources() -> list[tuple[str, type[EntropySource]]]:
         ("system", SystemEntropySource),
         ("timing", TimingNoiseSource),
         ("mock_uniform", MockUniformSource),
+        ("sham_qrng", _sham_factory),
     ]
 
 
 @pytest.fixture(params=_collect_entropy_sources(), ids=lambda x: x[0])
 def entropy_source(request: pytest.FixtureRequest) -> EntropySource:
     """Parametrized fixture yielding each simple entropy source instance."""
-    _, cls = request.param
-    source = cls()
+    _, cls_or_factory = request.param
+    source = cls_or_factory()
     yield source
     source.close()
 
@@ -298,25 +312,39 @@ def _collect_stages() -> list[tuple[str, PipelineStage]]:
     """Collect all registered pipeline stage instances."""
     from qr_sampler.stages import (
         AdaptiveInjectionStage,
-        CorrelatedWalkStage,
+        DRYPenaltyStage,
         EntropyFetchStage,
-        LogitNoiseStage,
+        EtaSamplingStage,
+        GumbelSelectionStage,
+        LogitPerturbationStage,
         MinPStage,
+        MirostatStage,
+        SelectionDriftStage,
         SelectionStage,
+        TailFreeSamplingStage,
+        TemperatureModulationStage,
         TemperatureStage,
-        TempVarianceStage,
+        TopNSigmaStage,
+        TypicalSamplingStage,
         XTCStage,
     )
 
     return [
         ("adaptive_injection", AdaptiveInjectionStage()),
-        ("logit_noise", LogitNoiseStage()),
+        ("logit_perturbation", LogitPerturbationStage()),
+        ("dry", DRYPenaltyStage()),
+        ("top_n_sigma", TopNSigmaStage()),
         ("temperature", TemperatureStage()),
-        ("temp_variance", TempVarianceStage()),
+        ("temp_modulation", TemperatureModulationStage()),
         ("min_p", MinPStage()),
+        ("tfs", TailFreeSamplingStage()),
+        ("typical", TypicalSamplingStage()),
+        ("eta", EtaSamplingStage()),
         ("xtc", XTCStage()),
         ("entropy_fetch", EntropyFetchStage()),
-        ("correlated_walk", CorrelatedWalkStage()),
+        ("selection_drift", SelectionDriftStage()),
+        ("mirostat", MirostatStage()),
+        ("gumbel_selection", GumbelSelectionStage()),
         ("selection", SelectionStage()),
     ]
 

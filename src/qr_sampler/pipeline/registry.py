@@ -47,7 +47,7 @@ class StageRegistry:
 
         try:
             eps = importlib.metadata.entry_points(group="qr_sampler.pipeline_stages")
-        except Exception:
+        except Exception:  # Intentional: must not crash on broken metadata
             logger.debug("Entry point discovery failed for qr_sampler.pipeline_stages")
             return
 
@@ -55,10 +55,8 @@ class StageRegistry:
             if ep.name not in cls._stages:
                 try:
                     cls._stages[ep.name] = ep.load()
-                except Exception:
-                    logger.warning(
-                        "Failed to load pipeline stage entry point: %s", ep.name
-                    )
+                except Exception:  # Intentional: one bad plugin must not block others
+                    logger.warning("Failed to load pipeline stage entry point: %s", ep.name)
 
     @classmethod
     def get(cls, name: str) -> type:
@@ -76,9 +74,7 @@ class StageRegistry:
         cls._load_entry_points()
         if name not in cls._stages:
             available = ", ".join(sorted(cls._stages.keys()))
-            raise KeyError(
-                f"Unknown pipeline stage: {name!r}. Available: {available}"
-            )
+            raise KeyError(f"Unknown pipeline stage: {name!r}. Available: {available}")
         return cls._stages[name]
 
     @classmethod

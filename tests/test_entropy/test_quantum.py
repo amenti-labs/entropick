@@ -227,7 +227,7 @@ class TestQuantumGrpcSourceCircuitBreaker:
             mock_channel = MagicMock()
             mock_channel_fn.return_value = mock_channel
 
-            mock_unary_handle = AsyncMock(side_effect=Exception("connection refused"))
+            mock_unary_handle = AsyncMock(side_effect=OSError("connection refused"))
             mock_channel.unary_unary = MagicMock(return_value=mock_unary_handle)
             mock_channel.stream_stream = MagicMock(return_value=MagicMock())
 
@@ -379,9 +379,9 @@ class TestCircuitBreakerHalfOpen:
             # First calls fail, then succeed.
             mock_unary_handle = AsyncMock(
                 side_effect=[
-                    Exception("fail"),
-                    Exception("fail"),
-                    Exception("fail"),
+                    OSError("fail"),
+                    OSError("fail"),
+                    OSError("fail"),
                     success_response,
                 ]
             )
@@ -426,7 +426,7 @@ class TestCircuitBreakerHalfOpen:
             mock_channel_fn.return_value = mock_channel
 
             # All calls fail — half-open test will also fail.
-            mock_unary_handle = AsyncMock(side_effect=Exception("still broken"))
+            mock_unary_handle = AsyncMock(side_effect=OSError("still broken"))
             mock_channel.unary_unary = MagicMock(return_value=mock_unary_handle)
             mock_channel.stream_stream = MagicMock(return_value=MagicMock())
 

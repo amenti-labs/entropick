@@ -15,4 +15,4 @@ env:
   QR_TOP_P: "0.95"
 
 # Default pipeline (all stages present, injection stages no-op):
-#   logit_noise -> temperature -> temp_variance -> entropy_fetch -> correlated_walk -> selection
+#   logit_perturbation -> temperature -> temp_modulation -> entropy_fetch -> selection_drift -> selection

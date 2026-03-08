@@ -55,28 +55,36 @@ src/qr_sampler/
 |   +-- context.py                 # SamplingContext mutable dataclass -- state bag passed through all stages
 |   +-- registry.py                # StageRegistry: @register() decorator + entry-point auto-discovery
 +-- stages/
-|   +-- __init__.py                # Exports all 9 stage classes + build_default_pipeline()
+|   +-- __init__.py                # Exports all 16 stage classes + build_default_pipeline()
 |   +-- _utils.py                  # Shared stable_softmax(), shannon_entropy_from_probs()
 |   +-- adaptive_injection.py      # AdaptiveInjectionStage: entropy-based injection scaling
-|   +-- logit_noise.py             # LogitNoiseStage: M1 per-logit quantum noise
+|   +-- logit_perturbation.py             # LogitPerturbationStage: per-logit quantum noise
+|   +-- dry.py                     # DRYPenaltyStage: Don't Repeat Yourself n-gram penalty
+|   +-- top_n_sigma.py             # TopNSigmaStage: logit-space sigma filtering (pre-softmax)
 |   +-- temperature.py             # TemperatureStage: compute temperature via strategy
-|   +-- temp_variance.py           # TempVarianceStage: M2 quantum temperature modulation
+|   +-- temp_modulation.py           # TemperatureModulationStage: quantum temperature modulation
 |   +-- min_p.py                   # MinPStage: dynamic probability floor filtering
+|   +-- tfs.py                     # TailFreeSamplingStage: tail-free sampling via 2nd derivatives
+|   +-- typical.py                 # TypicalSamplingStage: locally typical sampling
+|   +-- eta.py                     # EtaSamplingStage: entropy-aware probability cutoff
 |   +-- xtc.py                     # XTCStage: quantum-driven top-token exclusion
 |   +-- entropy_fetch.py           # EntropyFetchStage: JIT entropy fetch + signal amplification
-|   +-- correlated_walk.py         # CorrelatedWalkStage: M3 per-request correlated walk
-|   +-- selection.py               # SelectionStage: CDF-based token selection
+|   +-- selection_drift.py         # SelectionDriftStage: per-request selection drift
+|   +-- mirostat.py                # MirostatStage: Mirostat v2 adaptive perplexity control
+|   +-- gumbel_selection.py        # GumbelSelectionStage: Gumbel-Max trick for selection
+|   +-- selection.py               # SelectionStage: CDF-based token selection (skipped if mirostat/gumbel active)
 +-- injection/
-|   +-- __init__.py                # Re-exports LogitNoise, TempVariance, CorrelatedWalk
+|   +-- __init__.py                # Re-exports LogitPerturbation, TemperatureModulation, SelectionDrift
 |   +-- _entropy_utils.py          # Shared bytes_to_uniform() helper (z-score -> CDF -> uniform)
-|   +-- logit_noise.py             # M1: Gaussian logit noise (quantum-seeded)
-|   +-- temp_variance.py           # M2: Temperature modulation via quantum entropy
-|   +-- correlated_walk.py         # M3: Per-request correlated walk position
+|   +-- logit_perturbation.py             # Gaussian logit perturbation (quantum-seeded)
+|   +-- temp_modulation.py           # Temperature modulation via quantum entropy
+|   +-- selection_drift.py         # Per-request selection drift position
 +-- amplification/
 |   +-- __init__.py                # Re-exports
 |   +-- base.py                    # SignalAmplifier ABC, AmplificationResult frozen dataclass
 |   +-- registry.py                # AmplifierRegistry (decorator + build pattern)
 |   +-- zscore.py                  # ZScoreMeanAmplifier (z-score -> normal CDF -> uniform)
+|   +-- calibration.py             # calibrate_population_stats(), measure_entropy_rate() for QRNG devices
 +-- entropy/
 |   +-- __init__.py                # Re-exports
 |   +-- base.py                    # EntropySource ABC (name, is_available, get_random_bytes, get_random_float64, close, health_check)
@@ -86,10 +94,22 @@ src/qr_sampler/
 |   +-- timing.py                  # TimingNoiseSource: CPU timing jitter (experimental)
 |   +-- mock.py                    # MockUniformSource: configurable seed/bias for testing
 |   +-- fallback.py                # FallbackEntropySource: composition wrapper, catches only EntropyUnavailableError
+|   +-- sham.py                    # ShamQrngSource: os.urandom() + simulated QRNG latency (for double-blind controls)
 +-- logging/
 |   +-- __init__.py                # Re-exports
-|   +-- types.py                   # TokenSamplingRecord frozen dataclass (16 fields, __slots__)
+|   +-- types.py                   # TokenSamplingRecord frozen dataclass (20 fields, __slots__)
 |   +-- logger.py                  # SamplingLogger: none/summary/full log levels, diagnostic_mode
++-- analysis/
+|   +-- __init__.py                # Re-exports all analysis functions
+|   +-- persistence.py             # save_records() / load_records() for JSONL files
+|   +-- statistics.py              # Statistical test battery: autocorrelation, runs, Hurst, ApEn, cumulative deviation, Bayesian
+|   +-- compare.py                 # Two-sample comparison: Mann-Whitney, KS, Welch's t, Cohen's d, Stouffer's z
++-- adapters/
+|   +-- __init__.py                # Lazy-import adapter classes (no framework deps at import time)
+|   +-- _base.py                   # AdapterComponents: shared component builder for all adapters
+|   +-- transformers.py            # QRSamplerLogitsProcessorHF: Hugging Face model.generate() adapter
+|   +-- llamacpp.py                # QRSamplerCallback: llama-cpp-python callback adapter
+|   +-- sglang.py                  # QRSamplerCustomLogitProcessor: SGLang custom logit processor adapter
 +-- proto/
 |   +-- __init__.py
 |   +-- entropy_service.proto      # gRPC proto: GetEntropy (unary) + StreamEntropy (bidi)
@@ -111,18 +131,34 @@ tests/
 +-- conftest.py                    # Shared fixtures: default_config, sample_logits, batch_logits
 +-- helpers.py                     # Shared mock objects (MockVllmConfig, etc.) and test utilities
 +-- test_config.py                 # Config defaults, env vars, per-request resolution, validation
++-- test_contracts.py              # Auto-discovers all implementations and verifies ABC/protocol contracts
 +-- test_processor.py              # Integration: full pipeline, batch processing, update_state, one-hot
 +-- test_pipeline/
 |   +-- test_stages.py             # Protocol compliance, registry, default pipeline, custom pipelines, stage_state
-|   +-- test_new_stages.py         # Min-P, XTC, adaptive injection stage tests
+|   +-- test_new_stages.py         # Min-P, XTC, adaptive injection stage tests + edge cases
+|   +-- test_top_n_sigma.py        # Top-n-sigma filtering tests
+|   +-- test_tfs.py                # Tail-free sampling tests
+|   +-- test_typical.py            # Locally typical sampling tests
+|   +-- test_eta.py                # Eta sampling tests
+|   +-- test_mirostat.py           # Mirostat v2 tests
+|   +-- test_dry.py                # DRY penalty tests
+|   +-- test_gumbel.py             # Gumbel-Max unit tests (standalone stage)
+|   +-- test_gumbel_selection.py   # Gumbel-Max integration tests (full pipeline)
 +-- test_injection/
-|   +-- test_logit_noise.py        # M1: enabled/disabled, reproducibility, scaling, entropy failure
-|   +-- test_temp_variance.py      # M2: enabled/disabled, clamping, range, entropy failure
-|   +-- test_correlated_walk.py    # M3: drift, bounds, no-op, entropy failure
+|   +-- test_logit_perturbation.py  # Logit perturbation: enabled/disabled, reproducibility, scaling, entropy failure
+|   +-- test_temp_modulation.py    # Temperature modulation: enabled/disabled, clamping, range, entropy failure
+|   +-- test_selection_drift.py    # Selection drift: drift, bounds, no-op, entropy failure
 |   +-- test_integration.py        # Combined: all-methods, backward-compat, per-request-override
++-- test_analysis/
+|   +-- test_persistence.py        # JSONL save/load round-trip
+|   +-- test_statistics.py         # Statistical test battery (requires scipy)
+|   +-- test_compare.py            # Two-sample comparison tests (requires scipy)
++-- test_adapters/
+|   +-- test_transformers_adapter.py # HF adapter + SGLang + llama-cpp tests with mock tensors
 +-- test_statistical_properties.py # KS-test uniformity, bias detection, EDT monotonicity (requires scipy)
 +-- test_amplification/
 |   +-- test_zscore.py             # Known values, SEM derivation, edge cases, frozen immutability
+|   +-- test_calibration.py        # Calibration utility tests
 +-- test_entropy/
 |   +-- test_system.py             # Correct byte count, always available
 |   +-- test_timing.py             # Correct byte count, non-zero output
@@ -130,6 +166,8 @@ tests/
 |   +-- test_fallback.py           # Primary delegation, fallback trigger, error propagation
 |   +-- test_registry.py           # Decorator registration, entry-point discovery, lazy loading
 |   +-- test_quantum.py            # Mocked gRPC for 3 modes, circuit breaker, error mapping
+|   +-- test_sham.py               # Sham QRNG source tests
+|   +-- test_openentropy.py        # OpenEntropy source tests (mocked)
 +-- test_logging/
 |   +-- test_logger.py             # Record immutability, log levels, diagnostic mode, summary stats
 +-- test_selection/
@@ -137,13 +175,17 @@ tests/
 +-- test_temperature/
     +-- test_fixed.py              # Constant output, Shannon entropy computation
     +-- test_edt.py                # Monotonicity, clamping, exponent effects
++-- test_wire_format.py            # Protobuf wire format compatibility tests
 
 experiments/                       # YAML experiment presets with env var overrides
 +-- baseline.yaml                  # No injection methods (control)
-+-- m1_logit_noise.yaml            # M1 only: per-logit quantum noise
-+-- m2_temp_variance.yaml          # M2 only: quantum temperature modulation
-+-- m3_correlated_walk.yaml        # M3 only: correlated walk
++-- logit_perturbation.yaml         # Logit perturbation only: per-logit quantum noise
++-- temp_modulation.yaml           # Temperature modulation only: quantum temperature modulation
++-- selection_drift.yaml           # Selection drift only: drift-based token selection
 +-- combined.yaml                  # All three injection methods active
++-- min_p_filtering.yaml           # Min-P dynamic probability floor
++-- xtc_quantum.yaml               # XTC quantum top-token exclusion
++-- adaptive_injection.yaml        # Adaptive injection scaling
 
 examples/
 +-- servers/
@@ -193,10 +235,10 @@ examples/
     `src/qr_sampler/injection/` remain stateless; all state lives in `SamplingContext.stage_state`
     (a `dict[str, Any]` that persists across `apply()` calls via `_RequestState`).
 
-14. **`_RequestState` uses `stage_state` dict.** Per-request persistent state (e.g., correlated
-    walk position) is stored in `stage_state: dict[str, Any]`, keyed by convention as
-    `"stage_name.field"` (e.g., `"correlated_walk.position"`). The `walk_position` property on
-    `_RequestState` is a backward-compat accessor that reads/writes `stage_state`.
+14. **`_RequestState` uses `stage_state` dict.** Per-request persistent state (e.g., selection
+    drift position) is stored in `stage_state: dict[str, Any]`, keyed by convention as
+    `"stage_name.field"` (e.g., `"selection_drift.position"`). The `drift_position` property on
+    `_RequestState` is a convenience accessor that reads/writes `stage_state`.
 
 ## Coding conventions
 
@@ -223,12 +265,22 @@ logits (torch.Tensor or numpy, one row per batch request)
   +-> Build SamplingContext(row, config, entropy_source, amplifier, strategy, stage_state)
   |
   +-> for stage in pipeline:  stage(ctx)
-  |     1. LogitNoiseStage     -- [M1] add quantum-seeded Gaussian noise to logits
-  |     2. TemperatureStage    -- compute temperature + Shannon entropy via strategy
-  |     3. TempVarianceStage   -- [M2] modulate temperature: temp * (1 + beta * (u - 0.5))
-  |     4. EntropyFetchStage   -- JIT entropy fetch + amplification -> ctx.u
-  |     5. CorrelatedWalkStage -- [M3] walk-based u replacement via stage_state
-  |     6. SelectionStage      -- CDF-based token selection -> ctx.token_id
+  |      1. AdaptiveInjectionStage -- scale injection intensity by model uncertainty
+  |      2. LogitPerturbationStage -- quantum-seeded Gaussian noise on logits
+  |      3. DRYPenaltyStage        -- n-gram repetition penalty
+  |      4. TopNSigmaStage         -- logit-space sigma filtering (pre-softmax)
+  |      5. TemperatureStage       -- compute temperature + Shannon entropy
+  |      6. TemperatureModulationStage -- quantum temperature modulation
+  |      7. MinPStage              -- dynamic probability floor filtering
+  |      8. TailFreeSamplingStage  -- tail-free sampling via 2nd derivatives
+  |      9. TypicalSamplingStage   -- locally typical sampling
+  |     10. EtaSamplingStage       -- entropy-aware probability cutoff
+  |     11. XTCStage               -- quantum-driven top-token exclusion
+  |     12. EntropyFetchStage      -- JIT entropy fetch + amplification -> ctx.u
+  |     13. SelectionDriftStage    -- drift-based u replacement
+  |     14. MirostatStage          -- Mirostat v2 adaptive perplexity control
+  |     15. GumbelSelectionStage   -- Gumbel-Max trick for selection
+  |     16. SelectionStage         -- CDF-based token selection (skipped if mirostat/gumbel active)
   |
   +-> Persist ctx.stage_state back to _RequestState
   |
@@ -238,7 +290,7 @@ logits (torch.Tensor or numpy, one row per batch request)
 ```
 
 Each stage reads/writes `SamplingContext` fields. Stages no-op when their config
-parameter is disabled (e.g., `logit_noise_alpha <= 0`). The pipeline is a plain
+parameter is disabled (e.g., `logit_perturbation_alpha <= 0`). The pipeline is a plain
 `list[PipelineStage]` -- users can reorder, add, or remove stages.
 
 ### Config resolution flow

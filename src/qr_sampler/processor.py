@@ -14,7 +14,6 @@ separate instances for different sampling strategies.
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 import logging
 import time
@@ -22,10 +21,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from qr_sampler.adapters._base import _build_entropy_source, _config_hash
 from qr_sampler.amplification.registry import AmplifierRegistry
 from qr_sampler.config import QRSamplerConfig, resolve_config, validate_extra_args
-from qr_sampler.entropy.fallback import FallbackEntropySource
-from qr_sampler.entropy.registry import EntropySourceRegistry
 from qr_sampler.logging.logger import SamplingLogger
 from qr_sampler.logging.types import TokenSamplingRecord
 from qr_sampler.pipeline.context import SamplingContext
@@ -42,92 +40,6 @@ logger = logging.getLogger("qr_sampler")
 
 # Default vocabulary size when vllm_config does not provide one (testing).
 _DEFAULT_VOCAB_SIZE = 32000
-
-
-def _config_hash(config: QRSamplerConfig) -> str:
-    """Compute a short hash of the config for logging.
-
-    Args:
-        config: The sampler configuration to hash.
-
-    Returns:
-        First 16 hex characters of the SHA-256 digest of the config dump.
-    """
-    raw = config.model_dump_json().encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()[:16]
-
-
-def _accepts_config(cls: type) -> bool:
-    """Check if a class constructor accepts a QRSamplerConfig as first arg.
-
-    Inspects the ``__init__`` signature for a parameter annotated as
-    ``QRSamplerConfig`` (or whose name is ``config``).
-
-    Args:
-        cls: The class to inspect.
-
-    Returns:
-        True if the constructor expects a config argument.
-    """
-    import inspect
-
-    try:
-        sig = inspect.signature(cls)
-    except (ValueError, TypeError):
-        return False
-
-    params = list(sig.parameters.values())
-    for param in params:
-        annotation = param.annotation
-        if annotation is inspect.Parameter.empty:
-            if param.name == "config":
-                return True
-        elif annotation is QRSamplerConfig or (
-            isinstance(annotation, str) and "QRSamplerConfig" in annotation
-        ):
-            return True
-        # Only check the first non-self parameter.
-        break
-    return False
-
-
-def _build_entropy_source(config: QRSamplerConfig) -> EntropySource:
-    """Build the entropy source from config, wrapping with fallback if needed.
-
-    Args:
-        config: Sampler configuration specifying source type and fallback mode.
-
-    Returns:
-        An EntropySource, potentially wrapped in FallbackEntropySource.
-    """
-    source_cls = EntropySourceRegistry.get(config.entropy_source_type)
-
-    if _accepts_config(source_cls):
-        primary: EntropySource = source_cls(config)  # type: ignore[call-arg]
-    else:
-        primary = source_cls()
-
-    if config.fallback_mode == "error":
-        return primary
-
-    if config.fallback_mode == "system":
-        from qr_sampler.entropy.system import SystemEntropySource
-
-        fallback: EntropySource = SystemEntropySource()
-    elif config.fallback_mode == "mock_uniform":
-        from qr_sampler.entropy.mock import MockUniformSource
-
-        fallback = MockUniformSource()
-    else:
-        logger.warning(
-            "Unknown fallback_mode %r, using system fallback",
-            config.fallback_mode,
-        )
-        from qr_sampler.entropy.system import SystemEntropySource
-
-        fallback = SystemEntropySource()
-
-    return FallbackEntropySource(primary, fallback)
 
 
 class _RequestState:
@@ -158,13 +70,13 @@ class _RequestState:
         self.stage_state = stage_state
 
     @property
-    def walk_position(self) -> float:
-        """Convenience accessor for correlated walk position."""
-        return float(self.stage_state.get("correlated_walk.position", 0.5))
+    def drift_position(self) -> float:
+        """Convenience accessor for selection drift position."""
+        return float(self.stage_state.get("selection_drift.position", 0.5))
 
-    @walk_position.setter
-    def walk_position(self, value: float) -> None:
-        self.stage_state["correlated_walk.position"] = value
+    @drift_position.setter
+    def drift_position(self, value: float) -> None:
+        self.stage_state["selection_drift.position"] = value
 
 
 class QRSamplerLogitsProcessor:
@@ -230,15 +142,12 @@ class QRSamplerLogitsProcessor:
         # --- Per-request state ---
         self._request_states: dict[int, _RequestState] = {}
 
-        logger.info(
+        logger.debug(
             "QRSamplerLogitsProcessor initialized: vocab_size=%d, "
-            "entropy_source=%s, amplifier=%s, temperature=%s, "
-            "pipeline=[%s]",
+            "entropy_source=%s, pipeline=%d stages",
             self._vocab_size,
             self._entropy_source.name,
-            self._default_config.signal_amplifier_type,
-            self._default_config.temperature_strategy,
-            ", ".join(s.name for s in self._pipeline),
+            len(self._pipeline),
         )
 
     @staticmethod
@@ -362,7 +271,9 @@ class QRSamplerLogitsProcessor:
 
             # Initialize persistent stage state.
             stage_state: dict[str, Any] = {
-                "correlated_walk.position": req_config.walk_initial_position,
+                "selection_drift.position": req_config.drift_initial_position,
+                "mirostat.mu": 2.0 * req_config.mirostat_tau,
+                "token_history": [],
             }
 
             self._request_states[req_idx] = _RequestState(
@@ -430,6 +341,7 @@ class QRSamplerLogitsProcessor:
             strategy = self._default_strategy
             hash_str = self._default_config_hash
             stage_state = {}
+            logger.debug("No request state for row %d, using defaults", i)
 
         # --- Extract row as numpy ---
         if is_1d:
@@ -452,11 +364,18 @@ class QRSamplerLogitsProcessor:
         for stage in self._pipeline:
             stage(ctx)
 
+        # --- Append selected token to history (used by DRY penalty) ---
+        if ctx.token_id >= 0:
+            ctx.stage_state.setdefault("token_history", []).append(ctx.token_id)
+
         # --- Persist stage state back to request state ---
         if state is not None:
             state.stage_state = ctx.stage_state
 
         # --- Force one-hot logits ---
+        if ctx.token_id < 0:
+            logger.error("Pipeline produced no token selection; skipping one-hot forcing")
+            return
         if is_1d:
             self._force_onehot(logits, ctx.token_id, is_numpy)
         else:
@@ -483,6 +402,10 @@ class QRSamplerLogitsProcessor:
             token_prob=ctx.token_prob,
             num_candidates=ctx.num_candidates,
             config_hash=hash_str,
+            injection_alpha=ctx.effective_alpha,
+            injection_beta=ctx.effective_beta,
+            injection_step=ctx.effective_step,
+            injection_scale=ctx.injection_scale,
         )
         self._logger.log_token(record)
 

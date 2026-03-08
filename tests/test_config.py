@@ -212,7 +212,19 @@ class TestResolveConfig:
                 increment = multiple_of if multiple_of is not None else 1
                 override_val = default_val + increment
             elif isinstance(default_val, float):
-                override_val = default_val + 0.1
+                # Respect le (upper bound) constraints on float fields.
+                le_val = next(
+                    (
+                        getattr(m, "le", None)
+                        for m in field_info.metadata
+                        if hasattr(m, "le") and getattr(m, "le", None) is not None
+                    ),
+                    None,
+                )
+                if le_val is not None and default_val + 0.1 > le_val:
+                    override_val = max(0.0, default_val - 0.1)
+                else:
+                    override_val = default_val + 0.1
             elif isinstance(default_val, str):
                 override_val = default_val + "_test"
             else:
@@ -369,25 +381,25 @@ class TestInjectionFieldValidation:
         with pytest.raises(ValidationError):
             QRSamplerConfig(sample_count=sample_count, _env_file=None)  # type: ignore[call-arg]
 
-    @pytest.mark.parametrize("walk_initial_position", [-0.1, 1.0, 1.5])
-    def test_walk_initial_position_out_of_range(self, walk_initial_position: float) -> None:
+    @pytest.mark.parametrize("drift_initial_position", [-0.1, 1.0, 1.5])
+    def test_drift_initial_position_out_of_range(self, drift_initial_position: float) -> None:
         with pytest.raises(ValidationError):
             QRSamplerConfig(
-                walk_initial_position=walk_initial_position,
+                drift_initial_position=drift_initial_position,
                 _env_file=None,  # type: ignore[call-arg]
             )
 
-    def test_walk_initial_position_disallows_nan(self) -> None:
+    def test_drift_initial_position_disallows_nan(self) -> None:
         with pytest.raises(ValidationError):
-            QRSamplerConfig(walk_initial_position=float("nan"), _env_file=None)  # type: ignore[call-arg]
+            QRSamplerConfig(drift_initial_position=float("nan"), _env_file=None)  # type: ignore[call-arg]
 
     @pytest.mark.parametrize(
         "field_name, value",
         [
-            ("logit_noise_alpha", -0.1),
-            ("logit_noise_sigma", -0.1),
-            ("temp_variance_beta", -0.1),
-            ("walk_step", -0.1),
+            ("logit_perturbation_alpha", -0.1),
+            ("logit_perturbation_sigma", -0.1),
+            ("temp_modulation_beta", -0.1),
+            ("drift_step", -0.1),
         ],
     )
     def test_injection_fields_are_non_negative(self, field_name: str, value: float) -> None:
@@ -471,10 +483,10 @@ class TestOpenEntropyConfigFields:
             config = QRSamplerConfig(_env_file=None)  # type: ignore[call-arg]
         assert config.oe_conditioning == "sha256"
 
-    def test_oe_conditioning_per_request(self, default_config: QRSamplerConfig) -> None:
-        """Verify oe_conditioning can be overridden per-request."""
-        result = resolve_config(default_config, {"qr_oe_conditioning": "vonneumann"})
-        assert result.oe_conditioning == "vonneumann"
+    def test_oe_conditioning_infra_locked(self) -> None:
+        """Verify oe_conditioning cannot be overridden per-request."""
+        with pytest.raises(ConfigValidationError, match="infrastructure field"):
+            validate_extra_args({"qr_oe_conditioning": "sha256"})
 
     def test_oe_sources_infra_locked(self) -> None:
         """Verify oe_sources cannot be overridden per-request."""

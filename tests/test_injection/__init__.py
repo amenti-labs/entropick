@@ -1,1 +1,1 @@
-"""Tests for entropy injection methods (M1, M2, M3)."""
+"""Tests for entropy injection methods."""

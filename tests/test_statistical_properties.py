@@ -405,3 +405,79 @@ class TestOneHotCorrectness:
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+
+class TestSerialCorrelation:
+    """Verify that entropy source output shows no serial correlation."""
+
+    def test_serial_correlation_raw_bytes(self) -> None:
+        """Lag-1 autocorrelation of SystemEntropySource output should be near 0.
+
+        For truly independent random bytes, the lag-1 Pearson correlation
+        should be statistically indistinguishable from zero.
+        """
+        from qr_sampler.entropy.system import SystemEntropySource
+
+        source = SystemEntropySource()
+        raw = source.get_random_bytes(100_000)
+        values = np.frombuffer(raw, dtype=np.uint8).astype(np.float64)
+
+        # Lag-1 Pearson correlation.
+        corr = np.corrcoef(values[:-1], values[1:])[0, 1]
+
+        assert abs(corr) < 0.02, (
+            f"Lag-1 autocorrelation = {corr:.6f} is too large for independent bytes"
+        )
+
+
+class TestEntropyRate:
+    """Verify that random bytes are not compressible."""
+
+    def test_entropy_rate_not_compressible(self) -> None:
+        """Random bytes should not compress well under zlib.
+
+        High-entropy data should have a compression ratio (compressed / original)
+        above 0.95 -- zlib cannot exploit any structure.
+        """
+        import zlib
+
+        from qr_sampler.entropy.system import SystemEntropySource
+
+        source = SystemEntropySource()
+        raw = source.get_random_bytes(100_000)
+
+        compressed = zlib.compress(raw, level=9)
+        ratio = len(compressed) / len(raw)
+
+        assert ratio > 0.95, (
+            f"Compression ratio = {ratio:.4f} is too low -- "
+            f"random bytes should not be compressible (expected > 0.95)"
+        )
+
+
+class TestProbitNormality:
+    """Verify that the _probit function produces approximately normal output."""
+
+    def test_probit_produces_normal(self) -> None:
+        """The _probit function applied to uniform inputs should yield values
+        that are approximately standard normal (mean ~ 0, std ~ 1).
+        """
+        from qr_sampler.injection.logit_perturbation import _probit
+
+        rng = np.random.default_rng(42)
+        u = rng.uniform(1e-6, 1.0 - 1e-6, size=10_000)
+        z = _probit(u)
+
+        # Mean should be near 0.
+        assert abs(float(np.mean(z))) < 0.05, (
+            f"Probit output mean = {np.mean(z):.4f}, expected near 0"
+        )
+
+        # Std should be near 1.
+        assert abs(float(np.std(z)) - 1.0) < 0.05, (
+            f"Probit output std = {np.std(z):.4f}, expected near 1.0"
+        )
+
+        # Shapiro-Wilk normality test on a subsample (max 5000 for scipy).
+        _, p_value = scipy_stats.shapiro(rng.choice(z, size=5000, replace=False))
+        assert p_value > 0.01, f"Shapiro-Wilk rejected normality of probit output: p={p_value:.4f}"

@@ -35,8 +35,7 @@ class EntropyFetchStage:
         if isinstance(ctx.entropy_source, FallbackEntropySource):
             ctx.entropy_source_name = ctx.entropy_source.last_source_used
             ctx.entropy_is_fallback = (
-                ctx.entropy_source.last_source_used
-                != ctx.entropy_source._primary.name
+                ctx.entropy_source.last_source_used != ctx.entropy_source.primary_name
             )
 
         t_end = time.perf_counter_ns()
