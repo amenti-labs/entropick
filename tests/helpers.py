@@ -1,4 +1,4 @@
-"""Shared test mock objects and helpers for qr-sampler tests."""
+"""Shared test mock objects and helpers for entropick tests."""
 
 from __future__ import annotations
 

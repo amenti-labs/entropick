@@ -1,4 +1,4 @@
-"""Exception hierarchy for qr-sampler.
+"""Exception hierarchy for entropick.
 
 All exceptions derive from QRSamplerError, enabling broad catch patterns
 at the application boundary while allowing fine-grained handling internally.
@@ -6,7 +6,7 @@ at the application boundary while allowing fine-grained handling internally.
 
 
 class QRSamplerError(Exception):
-    """Base exception for all qr-sampler errors."""
+    """Base exception for all entropick errors."""
 
 
 class EntropyUnavailableError(QRSamplerError):

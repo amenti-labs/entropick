@@ -1,6 +1,6 @@
-"""Framework adapters for qr-sampler.
+"""Framework adapters for entropick.
 
-Thin wrappers that integrate the qr-sampler pipeline with different
+Thin wrappers that integrate the entropick pipeline with different
 inference frameworks. Each adapter converts framework-specific input/output
 formats while delegating all sampling logic to the shared pipeline.
 

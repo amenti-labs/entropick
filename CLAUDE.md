@@ -2,9 +2,9 @@
 
 ## What this project is
 
-`qr-sampler` is a vLLM V1 LogitsProcessor plugin that replaces standard token sampling with external-entropy-driven selection. It fetches random bytes from any entropy source (QRNGs via gRPC, OS randomness, CPU timing jitter), amplifies the signal into a uniform float via z-score statistics, and uses that float to select a token from a probability-ordered CDF.
+`entropick` (package: `qr_sampler`) is a vLLM V1 LogitsProcessor plugin that replaces standard token sampling with external-entropy-driven selection. It fetches random bytes from any entropy source (QRNGs via gRPC, OpenEntropy hardware noise, OS randomness, CPU timing jitter), amplifies the signal into a uniform float via z-score statistics, and uses that float to select a token from a probability-ordered CDF.
 
-This is a **pure plugin** -- it does not modify vLLM source code. It registers via the `vllm.logits_processors` entry point in `pyproject.toml`. The primary use case is consciousness-research: studying whether conscious intent can influence quantum-random processes in LLM token selection.
+This is a **pure plugin** -- it does not modify vLLM source code. It registers via the `vllm.logits_processors` entry point in `pyproject.toml`. It also provides adapters for Hugging Face Transformers, llama.cpp, and SGLang. The primary use case is consciousness-research: studying whether conscious intent can influence quantum-random processes in LLM token selection.
 
 ## Commands
 
@@ -81,6 +81,7 @@ src/qr_sampler/
 |   +-- base.py                    # SignalAmplifier ABC, AmplificationResult frozen dataclass
 |   +-- registry.py                # AmplifierRegistry (decorator + build pattern)
 |   +-- zscore.py                  # ZScoreMeanAmplifier (z-score -> normal CDF -> uniform)
+|   +-- ecdf.py                    # ECDFAmplifier: empirical CDF amplification (no distributional assumptions)
 |   +-- calibration.py             # calibrate_population_stats(), measure_entropy_rate() for QRNG devices
 +-- entropy/
 |   +-- __init__.py                # Re-exports
@@ -88,7 +89,6 @@ src/qr_sampler/
 |   +-- registry.py                # EntropySourceRegistry with entry-point auto-discovery from qr_sampler.entropy_sources
 |   +-- quantum.py                 # QuantumGrpcSource: 3 modes (unary, server_streaming, bidi_streaming), circuit breaker, grpc.aio
 |   +-- system.py                  # SystemEntropySource: os.urandom()
-|   +-- timing.py                  # TimingNoiseSource: CPU timing jitter (experimental)
 |   +-- mock.py                    # MockUniformSource: configurable seed/bias for testing
 |   +-- fallback.py                # FallbackEntropySource: composition wrapper, catches only EntropyUnavailableError
 |   +-- sham.py                    # ShamQrngSource: os.urandom() + simulated QRNG latency (for double-blind controls)
@@ -98,12 +98,13 @@ src/qr_sampler/
 |   +-- logger.py                  # SamplingLogger: none/summary/full log levels, diagnostic_mode
 +-- analysis/
 |   +-- __init__.py                # Re-exports all analysis functions
+|   +-- _utils.py                  # Shared helpers (_require_scipy_stats)
 |   +-- persistence.py             # save_records() / load_records() for JSONL files
 |   +-- statistics.py              # Statistical test battery: autocorrelation, runs, Hurst, ApEn, cumulative deviation, Bayesian
 |   +-- compare.py                 # Two-sample comparison: Mann-Whitney, KS, Welch's t, Cohen's d, Stouffer's z
 +-- adapters/
 |   +-- __init__.py                # Lazy-import adapter classes (no framework deps at import time)
-|   +-- _base.py                   # AdapterComponents: shared component builder for all adapters
+|   +-- _base.py                   # AdapterComponents, _AdapterBase, _run_pipeline_and_log, _init_stage_state
 |   +-- transformers.py            # QRSamplerLogitsProcessorHF: Hugging Face model.generate() adapter
 |   +-- llamacpp.py                # QRSamplerCallback: llama-cpp-python callback adapter
 |   +-- sglang.py                  # QRSamplerCustomLogitProcessor: SGLang custom logit processor adapter
@@ -171,6 +172,11 @@ tests/
     +-- test_edt.py                # Monotonicity, clamping, exponent effects
 +-- test_wire_format.py            # Protobuf wire format compatibility tests
 
+deployments/                       # Production deployment configs per entropy source
++-- _template/                     # Starter template for new deployments
++-- openentropy/                   # OpenEntropy hardware entropy deployment
++-- urandom/                       # OS urandom (baseline) deployment
+
 experiments/                       # YAML experiment presets with env var overrides
 +-- baseline.yaml                  # No injection methods (control)
 +-- logit_perturbation.yaml         # Logit perturbation only: per-logit quantum noise
@@ -184,7 +190,6 @@ experiments/                       # YAML experiment presets with env var overri
 examples/
 +-- servers/
 |   +-- simple_urandom_server.py   # Minimal reference server (~50 lines of logic)
-|   +-- timing_noise_server.py     # CPU timing jitter entropy server
 |   +-- qrng_template_server.py    # Annotated template with 3 TODO sections
 +-- docker/
 |   +-- Dockerfile.entropy-server  # Slim Python image for any example server

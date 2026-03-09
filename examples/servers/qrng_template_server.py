@@ -2,7 +2,7 @@
 """Annotated template for building your own QRNG entropy server.
 
 This file is a starting point for connecting ANY quantum random number
-generator (or other hardware entropy source) to qr-sampler. Copy this
+generator (or other hardware entropy source) to entropick. Copy this
 file, implement the three TODO sections, and you have a production-ready
 entropy server.
 
@@ -26,12 +26,12 @@ The template includes:
      - TODO 3: Clean up your hardware connection
 
   3. Install dependencies:
-     pip install grpcio qr-sampler
+     pip install grpcio entropick
 
   4. Run your server:
      python my_qrng_server.py --port 50051
 
-  5. Configure qr-sampler to use it:
+  5. Configure entropick to use it:
      export QR_GRPC_SERVER_ADDRESS=localhost:50051
      export QR_ENTROPY_SOURCE_TYPE=quantum_grpc
 
@@ -275,7 +275,7 @@ class QRNGEntropyServicer(EntropyServiceServicer):
         for the entire inference session. Each request generates fresh
         entropy on demand.
 
-        For server-streaming mode, qr-sampler sends one request and
+        For server-streaming mode, entropick sends one request and
         reads one response per call. For true bidi mode, it keeps the
         stream open and sends/reads repeatedly.
 
@@ -408,7 +408,7 @@ Quick start:
   1. Edit this file — search for "TODO:" (3 sections)
   2. Implement your hardware's init/generate/close methods
   3. Run: python %(prog)s --port 50051
-  4. Configure qr-sampler:
+  4. Configure entropick:
        export QR_GRPC_SERVER_ADDRESS=localhost:50051
        export QR_ENTROPY_SOURCE_TYPE=quantum_grpc
 

@@ -1,19 +1,19 @@
 # Open WebUI Integration
 
 [Open WebUI](https://github.com/open-webui/open-webui) provides a ChatGPT-style
-web interface for chatting with models served by vLLM. Every qr-sampler
+web interface for chatting with models served by vLLM. Every entropick
 deployment profile includes it as an optional Docker Compose service.
 
-This directory contains a **filter function** that lets you control qr-sampler
-parameters (temperature, top-k, top-p, sample count, etc.) directly from the
-Open WebUI admin panel — no API calls or environment variable changes needed.
+This directory contains a **filter function** that lets you control the common
+entropick per-request parameters (temperature, top-k, top-p, sample count, etc.)
+directly from the Open WebUI admin panel — no manual API editing needed.
 
 ## Starting Open WebUI
 
 From any deployment profile directory, add `--profile ui`:
 
 ```bash
-cd deployments/urandom          # or firefly-1, _template, your-profile
+cd deployments/urandom          # or _template, your-profile
 cp .env.example .env
 docker compose --profile ui up --build
 ```
@@ -38,7 +38,7 @@ The filter function ships as two files:
 4. Select `qr_sampler_filter.json` from this directory.
 5. Toggle the imported function to **Global** so it applies to all models.
 
-The filter is now active. Every chat message will include qr-sampler parameters
+The filter is now active. Every chat message will include entropick parameters
 in requests sent to vLLM.
 
 ### Alternative: paste the source
@@ -53,7 +53,7 @@ If you prefer not to use the JSON import:
 ## Configuring parameters (Valves)
 
 After importing the filter, click the **gear icon** next to it to open the
-Valves panel. Each Valve maps to a qr-sampler per-request parameter:
+Valves panel. Each Valve maps to an entropick per-request parameter:
 
 ### Filter control
 
@@ -66,8 +66,8 @@ Valves panel. Each Valve maps to a qr-sampler per-request parameter:
 
 | Valve | Default | Maps to | Description |
 |-------|---------|---------|-------------|
-| `top_k` | `50` | `qr_top_k` | Keep only the k most probable tokens (0 disables). |
-| `top_p` | `0.9` | `qr_top_p` | Nucleus sampling threshold (1.0 disables). |
+| `top_k` | `0` | `qr_top_k` | Keep only the k most probable tokens (0 disables). |
+| `top_p` | `1.0` | `qr_top_p` | Nucleus sampling threshold (1.0 disables). |
 
 ### Temperature
 
@@ -86,16 +86,10 @@ Valves panel. Each Valve maps to a qr-sampler per-request parameter:
 |-------|---------|---------|-------------|
 | `signal_amplifier_type` | `zscore_mean` | `qr_signal_amplifier_type` | Amplification algorithm. |
 | `sample_count` | `20480` | `qr_sample_count` | Entropy bytes fetched per token. |
-| `population_mean` | `127.5` | `qr_population_mean` | Null-hypothesis mean for byte values. |
-| `population_std` | `73.612...` | `qr_population_std` | Population std for uniform [0, 255]. |
-| `uniform_clamp_epsilon` | `1e-10` | `qr_uniform_clamp_epsilon` | Clamp u to avoid degenerate CDF. |
 
-### Logging
-
-| Valve | Default | Maps to | Description |
-|-------|---------|---------|-------------|
-| `log_level` | `summary` | `qr_log_level` | `none`, `summary`, or `full`. |
-| `diagnostic_mode` | `false` | `qr_diagnostic_mode` | Store all token records in memory. |
+The filter intentionally does **not** expose every possible `qr_*` field.
+Less common experimental knobs can still be sent directly via API calls if you
+need them.
 
 ## How it works
 
@@ -111,15 +105,16 @@ User types message in Open WebUI
   |
   +-> vLLM receives the request:
   |     - Unknown top-level keys become SamplingParams.extra_args
-  |     - qr-sampler's resolve_config() reads qr_* from extra_args
+  |     - entropick's resolve_config() reads qr_* from extra_args
   |     - Token sampling uses the parameters from the Valves
   |
   +-> Response streams back through Open WebUI to the user
 ```
 
-Infrastructure settings (gRPC server address, fallback mode, etc.) are
-**not** exposed as Valves — they cannot change per-request and are controlled
-by environment variables on the vLLM container.
+Infrastructure settings (gRPC server address, fallback mode, OpenEntropy
+settings, logging, diagnostic capture, etc.) are **not** exposed as Valves.
+They cannot change per-request and are controlled by environment variables on
+the vLLM container.
 
 ## What is NOT controlled by the filter
 
@@ -138,12 +133,12 @@ the main README for the full list.
 
 ## Disabling the filter
 
-To stop injecting qr-sampler parameters without removing the filter:
+To stop injecting entropick parameters without removing the filter:
 
 1. Open the Valves panel (gear icon).
 2. Set `enable_qr_sampling` to `false`.
 
-Requests will pass through to vLLM unmodified, and qr-sampler will use its
+Requests will pass through to vLLM unmodified, and entropick will use its
 default configuration from environment variables.
 
 ## Customizing the UI port

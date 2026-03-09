@@ -195,3 +195,36 @@ class TestGumbelEdgeCases:
         logits = np.array([SAMPLE_LOGITS])
         result = proc.apply(logits)
         assert_onehot(result[0])
+
+    def test_with_top_p(self) -> None:
+        """Gumbel selection applies nucleus (top-p) filtering."""
+        proc = make_processor(
+            gumbel_selection=True,
+            top_p=0.5,
+            diagnostic_mode=True,
+        )
+        register_request(proc, req_index=0)
+        # Skewed logits: one dominant token.
+        logits = np.array([[10.0, 5.0, 1.0, 0.0, -1.0, -2.0, -3.0, -5.0, -10.0, -20.0]])
+        result = proc.apply(logits)
+        assert_onehot(result[0])
+
+        records = proc.sampling_logger.get_diagnostic_data()
+        # top_p=0.5 should reduce candidates vs full vocab.
+        assert records[0].num_candidates < 10
+
+    def test_with_top_k_and_top_p(self) -> None:
+        """Gumbel selection applies both top-k and top-p filtering."""
+        proc = make_processor(
+            gumbel_selection=True,
+            top_k=5,
+            top_p=0.8,
+            diagnostic_mode=True,
+        )
+        register_request(proc, req_index=0)
+        logits = np.array([SAMPLE_LOGITS])
+        result = proc.apply(logits)
+        assert_onehot(result[0])
+
+        records = proc.sampling_logger.get_diagnostic_data()
+        assert records[0].num_candidates <= 5

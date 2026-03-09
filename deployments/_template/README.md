@@ -1,84 +1,77 @@
 # Deployment Profile Template
 
-Starting point for creating a new deployment profile. Copy this folder and
-customize it for your entropy source.
+Use this template when you already have your own entropy server and want a clean
+starting point. If you just want a working example, start from [`../urandom/`](../urandom/) instead.
 
-## Quick start
+## Shortest path
 
-1. Copy this template:
+```bash
+cp -r deployments/_template deployments/my-server
+cd deployments/my-server
+cp .env.example .env
+docker compose up --build
+```
 
-   ```bash
-   cp -r deployments/_template deployments/my-server
-   cd deployments/my-server
-   ```
+## What you usually change
 
-2. Configure your environment:
+| Variable | Why you change it |
+|----------|-------------------|
+| `QR_GRPC_SERVER_ADDRESS` | Point vLLM at your entropy server. |
+| `QR_GRPC_METHOD_PATH` | Match your unary RPC method. |
+| `QR_GRPC_STREAM_METHOD_PATH` | Match your streaming RPC method, if you support streaming. |
+| `QR_GRPC_API_KEY` | Add auth when your server requires it. |
+| `HF_MODEL` | Pick the model to serve. |
+| `HF_TOKEN` | Required only for gated models. |
 
-   ```bash
-   cp .env.example .env
-   ```
+If you do not know your method paths yet, keep reading. That is the one part people usually need to look up.
 
-   Edit `.env`:
-   - Set `QR_GRPC_SERVER_ADDRESS` to your server's address.
-   - Set `QR_GRPC_METHOD_PATH` to match your server's proto service/method.
-   - Set `QR_GRPC_STREAM_METHOD_PATH` (or leave empty to disable streaming).
-   - Add `QR_GRPC_API_KEY` if your server requires authentication.
+## If your server is co-located in Docker
 
-3. Start:
+Uncomment the `entropy-server` service block in `docker-compose.yml` and point it at your image or Dockerfile. See [`../urandom/docker-compose.yml`](../urandom/docker-compose.yml) for a working example.
 
-   ```bash
-   docker compose up --build
-   ```
-
-## Adding a co-located entropy server
-
-If your entropy server should run as a Docker container alongside vLLM,
-uncomment the `entropy-server` service block in `docker-compose.yml` and
-configure it with your server's Dockerfile or image. See
-[`../urandom/docker-compose.yml`](../urandom/docker-compose.yml) for a
-working example.
-
-When using a co-located server, set the gRPC address to the Docker service
-name (e.g., `entropy-server:50051`) instead of `localhost`.
+When the server is co-located, use the Docker service name for `QR_GRPC_SERVER_ADDRESS`, such as `entropy-server:50051`, not `localhost`.
 
 ## Finding the right gRPC method path
 
-The method path format is `/<package>.<Service>/<Method>` from your `.proto`
-file. For example:
+The method path format is:
+
+```text
+/<package>.<Service>/<Method>
+```
+
+For example:
 
 ```protobuf
-package qr_entropy;            // package = "qr_entropy"
-service EntropyService {        // service = "EntropyService"
-  rpc GetEntropy (...) ...;     // method  = "GetEntropy"
+package qr_entropy;
+service EntropyService {
+  rpc GetEntropy (...) ...;
 }
 ```
 
-Produces the path: `/qr_entropy.EntropyService/GetEntropy`
+Produces:
 
-The only requirement is that:
-- The **request** has the byte count as protobuf **field 1** (varint).
-- The **response** has the random bytes as protobuf **field 1** (length-delimited bytes).
+```text
+/qr_entropy.EntropyService/GetEntropy
+```
 
-Any proto definition following this convention works without code changes.
+The compatibility rule is simple:
 
-## Web UI (optional)
+- request message: byte count must be protobuf field `1`
+- response message: random bytes must be protobuf field `1`
 
-This template includes [Open WebUI](https://github.com/open-webui/open-webui), a
-ChatGPT-style web interface. It is not started by default — enable it with the
-`ui` Docker Compose profile:
+Any proto definition that follows that convention works without code changes.
+
+## Optional Web UI
+
+To also launch [Open WebUI](https://github.com/open-webui/open-webui):
 
 ```bash
 docker compose --profile ui up --build
 ```
 
-Open http://localhost:3000 to start chatting. Open WebUI connects to vLLM
-automatically.
+Open http://localhost:3000.
 
-A pre-built filter function for controlling qr-sampler parameters from the UI is
-available at [`examples/open-webui/`](../../examples/open-webui/). See that
-directory's README for import instructions.
-
-### Customizing the UI
+If you want UI-level control over entropick sampling parameters, use the filter in [examples/open-webui/](../../examples/open-webui/).
 
 | Setting | `.env` variable | Default |
 |---------|----------------|---------|

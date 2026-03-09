@@ -47,7 +47,7 @@ class OpenEntropySource(EntropySource):
     Configuration fields used from ``QRSamplerConfig``:
 
     * ``oe_conditioning`` — conditioning mode (``"raw"``, ``"vonneumann"``,
-      or ``"sha256"``). Per-request overridable.
+      or ``"sha256"``). Process-wide infrastructure setting.
     * ``oe_sources`` — comma-separated list of specific source names to
       sample from. Empty string means use all sources via ``collect_all()``.
     * ``oe_parallel`` — whether to collect from sources in parallel.
@@ -91,8 +91,8 @@ class OpenEntropySource(EntropySource):
 
     @property
     def is_available(self) -> bool:
-        """Whether OpenEntropy has at least one working source."""
-        return _OPENENTROPY_AVAILABLE and self._pool.source_count > 0
+        """Whether OpenEntropy has at least one working source and is not closed."""
+        return _OPENENTROPY_AVAILABLE and not self._closed and self._pool.source_count > 0
 
     def get_random_bytes(self, n: int) -> bytes:
         """Return exactly *n* random bytes from OpenEntropy sources.

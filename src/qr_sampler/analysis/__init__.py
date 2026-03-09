@@ -1,4 +1,4 @@
-"""Analysis module for qr-sampler experimental data.
+"""Analysis module for entropick experimental data.
 
 Provides persistence (JSONL save/load), statistical test batteries for
 entropy quality and consciousness-influence research, and two-sample

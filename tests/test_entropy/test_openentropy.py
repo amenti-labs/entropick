@@ -151,6 +151,23 @@ class TestOpenEntropySource:
             with pytest.raises(EntropyUnavailableError, match="closed"):
                 source.get_random_bytes(16)
 
+    def test_is_available_false_after_close(self, default_config: QRSamplerConfig) -> None:
+        """is_available should return False after close() is called."""
+        mock_pool = _make_mock_pool(source_count=3, bytes_return=b"\x00" * 16)
+        mock_pool_class = MagicMock(spec=[])
+        mock_pool_class.auto = MagicMock(return_value=mock_pool)
+
+        with (
+            patch("qr_sampler.entropy.openentropy._OPENENTROPY_AVAILABLE", True),
+            patch(_POOL_TARGET, mock_pool_class, create=True),
+        ):
+            from qr_sampler.entropy.openentropy import OpenEntropySource
+
+            source = OpenEntropySource(default_config)
+            assert source.is_available is True
+            source.close()
+            assert source.is_available is False
+
     def test_health_check_when_available(self, default_config: QRSamplerConfig) -> None:
         """health_check should return source, healthy, source_count, conditioning."""
         mock_pool = _make_mock_pool(source_count=5)

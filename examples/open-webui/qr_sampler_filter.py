@@ -1,13 +1,14 @@
 """
 title: QR-Sampler Parameters
-author: qr-sampler
-author_url: https://github.com/your-org/qr-sampler
+author: entropick
+author_url: https://github.com/your-org/entropick
 version: 0.1.0
 license: MIT
-description: Injects qr-sampler per-request parameters into vLLM requests. Configure sampling parameters via Valves to control external-entropy-driven token selection.
+description: >
+  Injects entropick per-request parameters into vLLM requests. Configure
+  sampling parameters via Valves to control external-entropy-driven token
+  selection.
 """
-
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -15,29 +16,30 @@ from pydantic import BaseModel, Field
 class Filter:
     """Open WebUI filter that injects qr_* parameters into vLLM requests.
 
-    When qr-sampler is loaded as a vLLM logits processor, it reads per-request
+    When entropick is loaded as a vLLM logits processor, it reads per-request
     overrides from extra fields in the request body (prefixed with ``qr_``).
     This filter adds those fields via the ``inlet()`` hook so that Open WebUI
-    users can control sampling parameters through the Valves UI without
-    manually editing API calls.
+    users can control the common per-request sampling parameters through the
+    Valves UI without manually editing API calls.
 
     Parameter flow::
 
         Open WebUI chat -> inlet() adds qr_* keys -> vLLM /v1/chat/completions
-        -> SamplingParams.extra_args -> qr-sampler resolve_config()
+        -> SamplingParams.extra_args -> entropick resolve_config()
 
     Toggle ``enable_qr_sampling`` to False to disable parameter injection
     entirely (requests pass through unmodified).
     """
 
     class Valves(BaseModel):
-        """Admin-configurable qr-sampler parameters.
+        """Admin-configurable entropick parameters.
 
-        Each field maps to a ``qr_*`` key that qr-sampler's
-        ``resolve_config()`` accepts. Only per-request-overridable fields
-        are exposed here; infrastructure settings (gRPC address, fallback
-        mode, etc.) are controlled by environment variables on the vLLM
-        container.
+        Each field maps to a ``qr_*`` key that entropick's
+        ``resolve_config()`` accepts. This filter intentionally exposes only
+        the most useful per-request knobs. Infrastructure settings (gRPC
+        address, fallback mode, logging, diagnostic capture, etc.) stay
+        process-wide and are configured via environment variables on the
+        vLLM container.
         """
 
         # --- Filter control ---
@@ -99,20 +101,10 @@ class Filter:
             description="Number of entropy bytes to fetch per token.",
         )
 
-        # --- Logging ---
-        log_level: str = Field(
-            default="summary",
-            description="Logging verbosity: 'none', 'summary', or 'full'.",
-        )
-        diagnostic_mode: bool = Field(
-            default=False,
-            description="Store all token records in memory for analysis.",
-        )
-
     def __init__(self) -> None:
         self.valves = self.Valves()
 
-    # Fields that are part of qr-sampler config (everything except filter-
+    # Fields that are part of entropick config (everything except filter-
     # internal fields like ``priority`` and ``enable_qr_sampling``).
     _QR_FIELDS: frozenset = frozenset(
         {
@@ -126,21 +118,19 @@ class Filter:
             "edt_max_temp",
             "top_k",
             "top_p",
-            "log_level",
-            "diagnostic_mode",
         }
     )
 
     async def inlet(
         self,
         body: dict,
-        __user__: Optional[dict] = None,
+        __user__: dict | None = None,
     ) -> dict:
         """Inject qr_* parameters into the request body before it reaches vLLM.
 
         Each Valve value is added as a top-level ``qr_<field>`` key.  vLLM
         maps unknown top-level keys to ``SamplingParams.extra_args``, and
-        qr-sampler's ``resolve_config()`` picks them up from there.
+        entropick's ``resolve_config()`` picks them up from there.
 
         Args:
             body: The request body (messages, model, stream, etc.).
@@ -162,7 +152,7 @@ class Filter:
     async def outlet(
         self,
         body: dict,
-        __user__: Optional[dict] = None,
+        __user__: dict | None = None,
     ) -> dict:
         """Pass-through — no post-processing needed.
 

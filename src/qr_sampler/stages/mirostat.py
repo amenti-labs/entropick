@@ -39,8 +39,15 @@ class MirostatStage:
     name: str = "mirostat"
 
     def __call__(self, ctx: SamplingContext) -> None:
-        if ctx.config.mirostat_mode not in (2,):
-            return  # Only Mirostat v2 is implemented; mode 0 and 1 are no-ops.
+        if ctx.config.mirostat_mode == 0:
+            return
+        if ctx.config.mirostat_mode != 2:
+            _logger.warning(
+                "Mirostat mode %d is not implemented; only mode 2 is supported. "
+                "Set mirostat_mode=2 or mirostat_mode=0 to disable.",
+                ctx.config.mirostat_mode,
+            )
+            return
 
         # --- Compute softmax probabilities ---
         probs = stable_softmax(ctx.row)

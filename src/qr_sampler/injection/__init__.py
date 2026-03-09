@@ -1,4 +1,4 @@
-"""Entropy injection methods for qr-sampler.
+"""Entropy injection methods for entropick.
 
 Three independent methods that reshape the probability distribution at
 different stages of the sampling pipeline. All three operate within the

@@ -1,4 +1,4 @@
-"""Result persistence for qr-sampler experimental sessions.
+"""Result persistence for entropick experimental sessions.
 
 Saves and loads TokenSamplingRecord sequences as JSONL files with
 optional metadata on the first line.

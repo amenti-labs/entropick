@@ -1,1 +1,1 @@
-"""Tests for the qr-sampler analysis module."""
+"""Tests for the entropick analysis module."""

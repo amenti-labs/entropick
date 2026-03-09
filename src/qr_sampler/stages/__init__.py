@@ -1,4 +1,4 @@
-"""Built-in pipeline stages for qr-sampler.
+"""Built-in pipeline stages for entropick.
 
 Provides the default sampling pipeline and all built-in stage classes.
 Each stage is registered via ``@StageRegistry.register()`` and discoverable

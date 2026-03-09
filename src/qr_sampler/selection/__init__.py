@@ -1,4 +1,4 @@
-"""Token selection subsystem for qr-sampler.
+"""Token selection subsystem for entropick.
 
 CDF-based token selection driven by an external uniform random value.
 Implements temperature scaling, top-k, softmax, top-p, and CDF binary search.

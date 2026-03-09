@@ -1,10 +1,10 @@
-# Contributing to qr-sampler
+# Contributing to entropick
 
 ## Development setup
 
 ```bash
-git clone https://github.com/ereid7/Quantum-random-vLLM-sampler.git
-cd Quantum-random-vLLM-sampler
+git clone https://github.com/ereid7/entropick.git
+cd entropick
 pip install -e ".[dev]"
 pre-commit install
 ```

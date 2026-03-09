@@ -1,84 +1,95 @@
 # Deployment Profiles
 
-Each deployment profile is a self-contained directory that configures qr-sampler
-to connect to a specific entropy source. Every profile contains:
+Each deployment profile is a self-contained setup for one entropy backend.
+Use this directory when you want the shortest path to a working server instead
+of wiring everything manually.
 
-- **`docker-compose.yml`** -- Complete Docker Compose file. Runs vLLM with
-  qr-sampler and any co-located entropy servers. No external files needed.
-- **`.env.example`** -- Annotated environment variable template. Copy to `.env`
-  and customize.
-- **`README.md`** -- Setup guide specific to this entropy source.
+## Choose a profile
 
-## Available profiles
+| Profile | Use it when | Runtime |
+|---------|-------------|---------|
+| [`urandom/`](urandom/) | You want the easiest end-to-end test of the gRPC entropy path. | Docker |
+| [`openentropy/`](openentropy/) | You want machine-local hardware noise with no network hop. | Native only |
+| [`_template/`](_template/) | You already have your own entropy server and need a starting point. | Usually Docker |
 
-| Profile | Entropy source | What it runs |
-|---------|---------------|--------------|
-| [`urandom/`](urandom/) | `os.urandom()` via gRPC | vLLM + co-located gRPC entropy server |
-| [`firefly-1/`](firefly-1/) | Quantum RNG via gRPC | vLLM only (QRNG server is external) |
-| [`_template/`](_template/) | Your custom source | Starting point for new profiles |
+## What you usually edit
 
-## Quick start (any profile)
+Most users only change a few variables:
 
-Every profile follows the same three steps:
+| Variable | Why you change it |
+|----------|-------------------|
+| `HF_MODEL` | Pick the model to serve. |
+| `HF_TOKEN` | Required only for gated Hugging Face models. |
+| `QR_ENTROPY_SOURCE_TYPE` | Usually already set correctly by the profile. Change only if you are repurposing it. |
+| `QR_GRPC_SERVER_ADDRESS` | Needed for custom or remote gRPC servers. |
+| `QR_OE_SOURCES` | Pick a specific OpenEntropy source such as `clock_jitter`. |
+| `QR_FALLBACK_MODE` | Decide whether failures should fall back or hard-fail. |
+
+Everything else is advanced tuning. For the full variable matrix, see [docs/config-reference.md](../docs/config-reference.md).
+
+## Shortest path
+
+### Docker profile
+
+Use this for [`urandom/`](urandom/) and most custom gRPC profiles:
 
 ```bash
 cd deployments/<profile>
-cp .env.example .env      # then edit .env with your settings
-docker compose up --build
-```
-
-For example, to run with the urandom entropy server:
-
-```bash
-cd deployments/urandom
 cp .env.example .env
 docker compose up --build
 ```
 
-To also start [Open WebUI](https://github.com/open-webui/open-webui) (a
-ChatGPT-style web interface), add `--profile ui`:
+### Native profile
+
+Use this for [`openentropy/`](openentropy/):
+
+```bash
+cd deployments/openentropy
+cp .env.example .env
+./run-local.sh
+```
+
+## Profile-specific guidance
+
+### `urandom/`
+
+Start here if you want the lowest-friction proof that:
+
+1. vLLM is loading.
+2. entropick is active.
+3. The gRPC entropy path works end to end.
+
+See [`urandom/README.md`](urandom/README.md).
+
+### `openentropy/`
+
+Use this when you want native machine-local entropy sources. This profile is
+not containerized because OpenEntropy needs direct host access.
+
+See [`openentropy/README.md`](openentropy/README.md).
+
+### `_template/`
+
+Use this when you already have your own gRPC entropy server and want a clean
+starting point rather than editing `urandom/`.
+
+See [`_template/README.md`](_template/README.md).
+
+## Optional Web UI
+
+Docker profiles can also launch [Open WebUI](https://github.com/open-webui/open-webui):
 
 ```bash
 docker compose --profile ui up --build
 ```
 
-Then open http://localhost:3000. See each profile's README for UI setup details
-and the optional [qr-sampler filter function](../examples/open-webui/) for
-controlling sampling parameters from the UI.
+Then open http://localhost:3000.
 
-## Creating your own profile
-
-1. Copy the template:
-
-   ```bash
-   cp -r deployments/_template deployments/my-server
-   ```
-
-2. Edit `deployments/my-server/.env.example` with your server's address, gRPC
-   method paths, and authentication settings. Then:
-
-   ```bash
-   cd deployments/my-server
-   cp .env.example .env
-   ```
-
-3. If your entropy server runs as a container alongside vLLM, uncomment the
-   `entropy-server` service in `docker-compose.yml`.
-
-4. Start:
-
-   ```bash
-   docker compose up --build
-   ```
-
-See [`_template/README.md`](_template/README.md) for full details.
+If you want UI-level control over sampling parameters, import the filter from [examples/open-webui/](../examples/open-webui/).
 
 ## Security notes
 
 - Profile `.env` files may contain API keys or other credentials.
-- The `_template/` and `urandom/` profiles contain **no secrets** and are
-  always safe to commit.
-- If your profile contains credentials you do not want in version control,
-  add its folder name to `deployments/.gitignore`.
-- qr-sampler never logs the `QR_GRPC_API_KEY` value. Health checks report
-  only whether authentication is enabled (`"authenticated": true/false`).
+- The `_template/` and `urandom/` profiles contain no secrets and are safe to commit as shipped.
+- If your profile contains credentials you do not want in version control, add its folder name to `deployments/.gitignore`.
+- entropick never logs the `QR_GRPC_API_KEY` value. Health checks report only whether authentication is enabled.

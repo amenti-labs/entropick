@@ -1,4 +1,4 @@
-"""Temperature strategy subsystem for qr-sampler.
+"""Temperature strategy subsystem for entropick.
 
 Computes per-token sampling temperature from the logit distribution.
 Supports fixed and entropy-based dynamic temperature (EDT) strategies.

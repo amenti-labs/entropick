@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal gRPC entropy server using os.urandom().
 
-This is the fastest way to get a working entropy server for qr-sampler.
+This is the fastest way to get a working entropy server for entropick.
 It serves random bytes from the operating system's cryptographic RNG
 and supports all three transport modes (unary, server-streaming, and
 bidirectional streaming).
@@ -19,7 +19,7 @@ Usage:
     # Enable reflection for debugging with grpcurl:
     python simple_urandom_server.py --reflection
 
-Then configure qr-sampler:
+Then configure entropick:
     export QR_GRPC_SERVER_ADDRESS=localhost:50051
     export QR_ENTROPY_SOURCE_TYPE=quantum_grpc
     export QR_GRPC_MODE=unary       # or bidi_streaming for lowest latency
@@ -39,7 +39,7 @@ import grpc
 
 # ---------------------------------------------------------------------------
 # The proto stubs live inside the qr_sampler package. We add the src/
-# directory to the path so this script works both when qr-sampler is
+# directory to the path so this script works both when entropick is
 # installed and when running directly from the repository.
 # ---------------------------------------------------------------------------
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

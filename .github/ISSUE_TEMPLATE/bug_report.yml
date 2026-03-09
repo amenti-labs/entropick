@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in qr-sampler
+description: Report a bug in entropick
 labels: ["bug"]
 body:
   - type: markdown

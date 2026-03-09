@@ -1,4 +1,4 @@
-"""Statistical test battery for qr-sampler entropy and consciousness research.
+"""Statistical test battery for entropick entropy and consciousness research.
 
 All public functions accept numpy arrays and return plain dicts with test
 results.  ``scipy`` is imported lazily -- it is only required at call time
@@ -13,21 +13,7 @@ from typing import Any
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _require_scipy_stats() -> Any:
-    """Import and return ``scipy.stats``, raising if unavailable."""
-    try:
-        from scipy import stats  # type: ignore[import-untyped]
-    except ImportError as exc:
-        raise ImportError(
-            "scipy is required for statistical tests. Install it with: pip install scipy"
-        ) from exc
-    return stats
-
+from qr_sampler.analysis._utils import _require_scipy_stats
 
 # ---------------------------------------------------------------------------
 # Public API

@@ -8,6 +8,7 @@ and invalid key detection.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -22,6 +23,8 @@ from qr_sampler.config import (
     validate_extra_args,
 )
 from qr_sampler.exceptions import ConfigValidationError
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # ---------------------------------------------------------------------------
 # Default values
@@ -245,9 +248,9 @@ class TestResolveConfig:
         assert result.top_p == 0.95
 
     def test_type_coercion_string_to_bool(self, default_config: QRSamplerConfig) -> None:
-        """Pydantic should coerce 'true' to True."""
-        result = resolve_config(default_config, {"qr_diagnostic_mode": "true"})
-        assert result.diagnostic_mode is True
+        """Pydantic should coerce 'true' to True for per-request boolean fields."""
+        result = resolve_config(default_config, {"qr_gumbel_selection": "true"})
+        assert result.gumbel_selection is True
 
     def test_per_request_rejects_invalid_sample_count(
         self, default_config: QRSamplerConfig
@@ -281,6 +284,8 @@ class TestNonOverridableFields:
             "oe_sources",
             "oe_parallel",
             "oe_timeout",
+            "log_level",
+            "diagnostic_mode",
         ],
     )
     def test_infrastructure_field_rejected(
@@ -502,3 +507,32 @@ class TestOpenEntropyConfigFields:
         """Verify oe_timeout cannot be overridden per-request."""
         with pytest.raises(ConfigValidationError, match="infrastructure field"):
             validate_extra_args({"qr_oe_timeout": "10.0"})
+
+
+# ---------------------------------------------------------------------------
+# Example env files
+# ---------------------------------------------------------------------------
+
+
+class TestExampleEnvFiles:
+    """Verify committed example env files stay loadable."""
+
+    @pytest.mark.parametrize(
+        ("path", "expected_source"),
+        [
+            (".env.example", "system"),
+            (".env.grpc.example", "quantum_grpc"),
+            (".env.openentropy.example", "openentropy"),
+            ("deployments/_template/.env.example", "quantum_grpc"),
+            ("deployments/urandom/.env.example", "quantum_grpc"),
+            ("deployments/openentropy/.env.example", "openentropy"),
+        ],
+    )
+    def test_example_env_file_loads(self, path: str, expected_source: str) -> None:
+        env_path = _REPO_ROOT / path
+        assert env_path.exists(), f"Missing example env file: {env_path}"
+
+        with patch.dict(os.environ, {}, clear=True):
+            config = QRSamplerConfig(_env_file=env_path)  # type: ignore[call-arg]
+
+        assert config.entropy_source_type == expected_source

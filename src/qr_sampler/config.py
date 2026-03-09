@@ -1,4 +1,4 @@
-"""Configuration system for qr-sampler.
+"""Configuration system for entropick.
 
 Uses pydantic-settings for declarative, layered configuration:
 init kwargs -> environment variables (QR_*) -> .env file -> field defaults.
@@ -51,8 +51,6 @@ _PER_REQUEST_FIELDS: frozenset[str] = frozenset(
         "dry_penalty_last_n",
         "dry_sequence_breakers",
         "gumbel_selection",
-        "log_level",
-        "diagnostic_mode",
         "logit_perturbation_alpha",
         "logit_perturbation_sigma",
         "temp_modulation_beta",
@@ -67,14 +65,14 @@ _ALL_FIELDS: frozenset[str] = frozenset()
 
 
 class QRSamplerConfig(BaseSettings):
-    """Configuration for qr-sampler.
+    """Configuration for entropick.
 
     Resolution order: init kwargs -> env vars (QR_*) -> .env file -> defaults.
 
     Fields are divided into two groups:
     - **Infrastructure**: Server addresses, timeouts, transport mode — NOT
       overridable per-request.
-    - **Sampling parameters**: Amplification, temperature, selection, logging
+    - **Sampling parameters**: Amplification, temperature, and selection
       — overridable per-request via SamplingParams.extra_args with qr_ prefix.
     """
 
@@ -387,7 +385,7 @@ class QRSamplerConfig(BaseSettings):
         default=False,
         description="Log injection method activity at each token.",
     )
-    # --- Logging (per-request overridable) ---
+    # --- Logging (infrastructure — process-wide) ---
 
     log_level: str = Field(
         default="summary",

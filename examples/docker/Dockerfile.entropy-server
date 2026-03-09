@@ -1,4 +1,4 @@
-# Dockerfile for qr-sampler entropy servers.
+# Dockerfile for entropick entropy servers.
 #
 # Builds a minimal image that can run any of the example entropy servers.
 # The server script is selected at runtime via the ENTROPY_SERVER env var.
@@ -8,9 +8,6 @@
 #
 # Run (urandom server):
 #   docker run -p 50051:50051 qr-entropy-server
-#
-# Run (timing noise server):
-#   docker run -p 50051:50051 -e ENTROPY_SERVER=timing_noise_server.py qr-entropy-server
 #
 # Run (your custom server):
 #   docker run -p 50051:50051 -v /path/to/my_server.py:/app/servers/my_server.py \

@@ -24,6 +24,7 @@ falls back to a secondary source when the server is slow or unreachable.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import threading
 import time
@@ -40,6 +41,26 @@ if TYPE_CHECKING:
     from qr_sampler.config import QRSamplerConfig
 
 logger = logging.getLogger("qr_sampler")
+
+
+# ---------------------------------------------------------------------------
+# Async utility helpers
+# ---------------------------------------------------------------------------
+
+
+async def _maybe_await_cancel(call: Any) -> None:
+    """Cancel a gRPC call, awaiting the result only when necessary.
+
+    grpc.aio call objects usually expose a synchronous ``cancel()`` method, but
+    tests may replace it with ``AsyncMock``. This helper supports both shapes
+    without leaking un-awaited coroutine warnings during cleanup.
+    """
+    cancel = getattr(call, "cancel", None)
+    if cancel is None:
+        return
+    result = cancel()
+    if inspect.isawaitable(result):
+        await result
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +240,7 @@ class QuantumGrpcSource(EntropySource):
             import grpc.aio  # noqa: F401 — availability check
         except ImportError as exc:
             raise ImportError(
-                "grpcio is required for QuantumGrpcSource. Install it with: pip install qr-sampler"
+                "grpcio is required for QuantumGrpcSource. Install it with: pip install entropick"
             ) from exc
 
         self._address = config.grpc_server_address
@@ -265,7 +286,7 @@ class QuantumGrpcSource(EntropySource):
         self._thread = threading.Thread(
             target=self._run_loop,
             daemon=True,
-            name="qr-sampler-grpc-loop",
+            name="entropick-grpc-loop",
         )
         self._thread.start()
 
@@ -458,7 +479,7 @@ class QuantumGrpcSource(EntropySource):
         raw_response: bytes | None = await call.read()
         if raw_response is None:
             raise EntropyUnavailableError("Server stream ended unexpectedly")
-        call.cancel()
+        await _maybe_await_cancel(call)
         return _decode_bytes_field1(raw_response)
 
     async def _fetch_bidi_streaming(self, n: int) -> bytes:
@@ -526,7 +547,7 @@ class QuantumGrpcSource(EntropySource):
 
         async def _shutdown() -> None:
             if self._bidi_call is not None:
-                self._bidi_call.cancel()
+                await _maybe_await_cancel(self._bidi_call)
                 self._bidi_call = None
             await self._channel.close()
 

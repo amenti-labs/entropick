@@ -1,4 +1,4 @@
-"""Statistical validation tests for the qr-sampler pipeline.
+"""Statistical validation tests for the entropick pipeline.
 
 These tests verify the mathematical properties that make the pipeline
 suitable for consciousness-influence research:
@@ -15,7 +15,7 @@ suitable for consciousness-influence research:
    and the rest -inf after apply().
 
 Requires scipy (dev dependency):
-    pip install qr-sampler[dev]
+    pip install entropick[dev]
 """
 
 from __future__ import annotations

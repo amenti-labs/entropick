@@ -1,100 +1,74 @@
 # urandom Profile
 
-Runs a co-located gRPC entropy server that generates random bytes from
-`os.urandom()`. This is the recommended starting point for testing the full
-gRPC entropy pipeline before connecting to real quantum random number generator
-hardware.
+Use this profile when you want the easiest possible proof that the full gRPC
+entropy path works. It runs a tiny entropy server backed by `os.urandom()`
+next to vLLM inside Docker.
 
-## Quick start
+## Shortest path
 
-1. Configure your environment:
-
-   ```bash
-   cd deployments/urandom
-   cp .env.example .env
-   ```
-
-   Edit `.env` if needed — set `HF_TOKEN` if using a gated model.
-
-2. Start:
-
-   ```bash
-   docker compose up --build
-   ```
-
-3. Send a request:
-
-   ```bash
-   curl http://localhost:8000/v1/completions \
-     -H "Content-Type: application/json" \
-     -d '{
-       "model": "Qwen/Qwen2.5-1.5B-Instruct",
-       "prompt": "The nature of consciousness is",
-       "max_tokens": 50
-     }'
-   ```
-
-## What this runs
-
-- **entropy-server** -- Lightweight gRPC server container running
-  `simple_urandom_server.py`. Listens on port 50051.
-- **vllm** -- vLLM inference server with qr-sampler plugin. Fetches entropy
-  from `entropy-server:50051` via Docker networking.
-
-Both containers start together. The entropy server starts first; vLLM waits
-for it via `depends_on`.
-
-## Switching to bidirectional streaming
-
-For lower latency, change `QR_GRPC_MODE` in your `.env` file:
-
+```bash
+cd deployments/urandom
+cp .env.example .env
+docker compose up --build
 ```
+
+Then send a request:
+
+```bash
+curl http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "prompt": "The nature of consciousness is",
+    "max_tokens": 50
+  }'
+```
+
+## What you usually change
+
+| Variable | Why you would change it |
+|----------|--------------------------|
+| `HF_MODEL` | Serve a different model. |
+| `HF_TOKEN` | Required only for gated models. |
+| `QR_GRPC_MODE` | Switch to `bidi_streaming` if you want lower latency. |
+| `QR_FALLBACK_MODE` | Choose whether failures fall back or hard-fail. |
+
+You do not need to edit method paths, API key headers, or circuit breaker settings for normal use.
+
+## What this profile is good for
+
+- Validating that entropick is wired into vLLM correctly.
+- Testing the full gRPC fetch path without real hardware.
+- Measuring the overhead of gRPC-based entropy relative to simpler local baselines.
+
+## Common upgrade
+
+If you want lower latency, set:
+
+```env
 QR_GRPC_MODE=bidi_streaming
 ```
 
-The urandom server supports all three transport modes (unary, server streaming,
-bidirectional streaming). Bidirectional streaming keeps a persistent gRPC
-connection open, reducing per-token overhead to ~50-100us on the same machine.
+The bundled urandom server supports `unary`, `server_streaming`, and `bidi_streaming`.
 
-## When to use this profile
+## What this runs
 
-- **Getting started**: Validate that the full entropy pipeline (gRPC fetch,
-  signal amplification, token selection) works end-to-end.
-- **Baseline experiments**: Compare system-entropy sampling against
-  gRPC-sourced sampling to measure the overhead.
-- **Development**: Test changes to the gRPC client without needing real
-  hardware.
+- `entropy-server`: lightweight gRPC server container running `simple_urandom_server.py`
+- `vllm`: vLLM with entropick enabled, fetching entropy from `entropy-server:50051`
 
-## Web UI (optional)
+The entropy server starts first and vLLM waits on it via `depends_on`.
 
-This profile includes [Open WebUI](https://github.com/open-webui/open-webui), a
-ChatGPT-style web interface. It is not started by default — enable it with the
-`ui` Docker Compose profile:
+## Optional Web UI
+
+To also start [Open WebUI](https://github.com/open-webui/open-webui):
 
 ```bash
 docker compose --profile ui up --build
 ```
 
-Open http://localhost:3000 to start chatting. Open WebUI connects to vLLM
-automatically — no configuration needed.
+Open http://localhost:3000.
 
-### Controlling qr-sampler parameters from the UI
-
-A pre-built filter function lets you adjust sampling parameters (temperature,
-top-k, top-p, sample count, etc.) directly from the Open WebUI admin panel
-instead of editing environment variables or API calls.
-
-To install the filter:
-
-1. Open http://localhost:3000 and go to **Admin Panel > Functions**.
-2. Click **Import** and select [`examples/open-webui/qr_sampler_filter.json`](../../examples/open-webui/qr_sampler_filter.json).
-3. Toggle the function to **Global** so it applies to all chats.
-4. Click the **gear icon** to open Valves and adjust parameters.
-
-See [`examples/open-webui/README.md`](../../examples/open-webui/README.md) for
-the full guide.
-
-### Customizing the UI
+If you want UI-level control over sampling parameters, import [`qr_sampler_filter.json`](../../examples/open-webui/qr_sampler_filter.json) and follow [examples/open-webui/README.md](../../examples/open-webui/README.md).
 
 | Setting | `.env` variable | Default |
 |---------|----------------|---------|
@@ -103,9 +77,9 @@ the full guide.
 
 Set `OPEN_WEBUI_AUTH=true` if the server is accessible by others.
 
-## Next steps
+## Next step after this profile
 
-Once this profile works, you can:
-1. Copy `_template/` to create a profile for your own entropy server.
-2. Point `QR_GRPC_SERVER_ADDRESS` at real QRNG hardware.
-3. Set up API key authentication if your server requires it.
+If this works and you want a real entropy source:
+
+1. Use [`_template/`](../_template/) for your own gRPC server.
+2. Use [`openentropy/`](../openentropy/) for native machine-local noise sources.

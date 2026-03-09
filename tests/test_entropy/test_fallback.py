@@ -177,6 +177,45 @@ class TestFallbackEntropySource:
         assert "p" in closed
         assert "f" in closed
 
+    def test_close_fallback_called_even_if_primary_raises(self) -> None:
+        """Fallback.close() must be called even if primary.close() raises."""
+        closed: list[str] = []
+
+        class _RaisesOnClose(EntropySource):
+            @property
+            def name(self) -> str:
+                return "raises"
+
+            @property
+            def is_available(self) -> bool:
+                return True
+
+            def get_random_bytes(self, n: int) -> bytes:
+                return b"\x00" * n
+
+            def close(self) -> None:
+                raise RuntimeError("primary close failed")
+
+        class _TrackClose2(EntropySource):
+            @property
+            def name(self) -> str:
+                return "track"
+
+            @property
+            def is_available(self) -> bool:
+                return True
+
+            def get_random_bytes(self, n: int) -> bytes:
+                return b"\x00" * n
+
+            def close(self) -> None:
+                closed.append("fallback")
+
+        source = FallbackEntropySource(_RaisesOnClose(), _TrackClose2())
+        with pytest.raises(RuntimeError, match="primary close failed"):
+            source.close()
+        assert "fallback" in closed
+
     def test_health_check(self) -> None:
         primary = _FixedBytesSource(0xAA)
         fallback = _FixedBytesSource(0xBB)

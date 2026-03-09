@@ -1,4 +1,4 @@
-"""Signal amplification subsystem for qr-sampler.
+"""Signal amplification subsystem for entropick.
 
 Converts raw entropy bytes into a uniform float u in (eps, 1-eps) that drives
 CDF-based token selection. The amplification preserves even tiny biases

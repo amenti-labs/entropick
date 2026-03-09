@@ -3,13 +3,13 @@ requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qr-sampler"
+name = "entropick"
 dynamic = ["version"]
-description = "Plug any randomness source into LLM token sampling via vLLM"
+description = "Plug any physical randomness source into LLM token sampling"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    { name = "qr-sampler contributors" },
+    { name = "entropick contributors" },
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -31,10 +31,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ereid7/Quantum-random-vLLM-sampler"
-Repository = "https://github.com/ereid7/Quantum-random-vLLM-sampler"
-Issues = "https://github.com/ereid7/Quantum-random-vLLM-sampler/issues"
-Changelog = "https://github.com/ereid7/Quantum-random-vLLM-sampler/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ereid7/entropick"
+Repository = "https://github.com/ereid7/entropick"
+Issues = "https://github.com/ereid7/entropick/issues"
+Changelog = "https://github.com/ereid7/entropick/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 openentropy = [
@@ -56,7 +56,6 @@ qr_sampler = "qr_sampler.processor:QRSamplerLogitsProcessor"
 [project.entry-points."qr_sampler.entropy_sources"]
 system = "qr_sampler.entropy.system:SystemEntropySource"
 quantum_grpc = "qr_sampler.entropy.quantum:QuantumGrpcSource"
-timing_noise = "qr_sampler.entropy.timing:TimingNoiseSource"
 mock_uniform = "qr_sampler.entropy.mock:MockUniformSource"
 sham_qrng = "qr_sampler.entropy.sham:ShamQrngSource"
 openentropy = "qr_sampler.entropy.openentropy:OpenEntropySource"

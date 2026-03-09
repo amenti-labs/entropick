@@ -44,11 +44,9 @@ def _collect_entropy_sources() -> list[tuple[str, type[EntropySource] | callable
     """Collect entropy sources that can be tested without external deps."""
     from qr_sampler.entropy.mock import MockUniformSource
     from qr_sampler.entropy.system import SystemEntropySource
-    from qr_sampler.entropy.timing import TimingNoiseSource
 
     return [
         ("system", SystemEntropySource),
-        ("timing", TimingNoiseSource),
         ("mock_uniform", MockUniformSource),
         ("sham_qrng", _sham_factory),
     ]

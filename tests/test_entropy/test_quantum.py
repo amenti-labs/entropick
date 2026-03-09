@@ -579,6 +579,13 @@ class TestQuantumGrpcSourceBidiStreaming:
         # once (the bidi call is reused).
         assert source._mock_stream_handle.call_count == 1
 
+    def test_close_awaits_async_cancel(self, source: Any) -> None:
+        """close() should await async cancel implementations used in tests."""
+        source.get_random_bytes(64)
+        mock_bidi_call = source._mock_stream_handle.return_value
+        source.close()
+        mock_bidi_call.cancel.assert_awaited_once()
+
     def test_bidi_stream_end_resets(self) -> None:
         """If bidi stream ends (read returns None), call should reset."""
         try:

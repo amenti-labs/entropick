@@ -82,12 +82,31 @@ class GumbelSelectionStage:
         if n_finite == 0:
             return
 
-        # --- Compute log-softmax ---
+        # --- Compute softmax ---
         probs = stable_softmax(logits)
         if probs is None:
             return
 
-        # Compute probabilities (for ranking and reporting).
+        # --- Top-p (nucleus) filtering ---
+        top_p = ctx.config.top_p
+        if 0.0 < top_p < 1.0:
+            sorted_indices = np.argsort(probs)[::-1]
+            sorted_probs = probs[sorted_indices]
+            cumulative = np.cumsum(sorted_probs)
+            cutoff_mask = cumulative >= top_p
+            if np.any(cutoff_mask):
+                cutoff_idx = int(np.argmax(cutoff_mask))
+            else:
+                cutoff_idx = len(sorted_probs) - 1
+            # Zero out tokens beyond the nucleus.
+            excluded = sorted_indices[cutoff_idx + 1 :]
+            probs[excluded] = 0.0
+            # Renormalize.
+            total = np.sum(probs)
+            if total > 0:
+                probs = probs / total
+
+        # Compute log-probabilities (for ranking and reporting).
         log_probs = np.full_like(logits, -np.inf, dtype=np.float64)
         pos_mask = probs > 0
         log_probs[pos_mask] = np.log(probs[pos_mask])

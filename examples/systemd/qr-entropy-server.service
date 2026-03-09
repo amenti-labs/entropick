@@ -1,4 +1,4 @@
-# systemd unit file for the qr-sampler entropy server.
+# systemd unit file for the entropick entropy server.
 #
 # Installation:
 #   1. Copy this file to /etc/systemd/system/:
@@ -24,8 +24,8 @@
 # ENTROPY_SERVER_SCRIPT in the environment file.
 
 [Unit]
-Description=qr-sampler Entropy Server (gRPC)
-Documentation=https://github.com/qr-sampler/qr-sampler
+Description=entropick Entropy Server (gRPC)
+Documentation=https://github.com/entropick/entropick
 After=network-online.target
 Wants=network-online.target
 
@@ -41,12 +41,12 @@ Group=qr-entropy
 EnvironmentFile=-/etc/default/qr-entropy-server
 
 # Working directory — adjust to your installation path.
-WorkingDirectory=/opt/qr-sampler
+WorkingDirectory=/opt/entropick
 
 # Start the entropy server.
 # Override ENTROPY_SERVER_SCRIPT in the env file to use a different server.
-ExecStart=/opt/qr-sampler/venv/bin/python \
-    ${ENTROPY_SERVER_SCRIPT:-/opt/qr-sampler/examples/servers/simple_urandom_server.py} \
+ExecStart=/opt/entropick/venv/bin/python \
+    ${ENTROPY_SERVER_SCRIPT:-/opt/entropick/examples/servers/simple_urandom_server.py} \
     --address ${LISTEN_ADDRESS:-0.0.0.0:50051} \
     --max-workers ${MAX_WORKERS:-4}
 

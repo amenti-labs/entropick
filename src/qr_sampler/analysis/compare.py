@@ -1,4 +1,4 @@
-"""Two-sample comparison tools for qr-sampler experimental sessions.
+"""Two-sample comparison tools for entropick experimental sessions.
 
 Provides non-parametric and parametric comparisons of u-value
 distributions between control and experimental conditions, plus
@@ -13,16 +13,7 @@ from typing import Any
 
 import numpy as np
 
-
-def _require_scipy_stats() -> Any:
-    """Import and return ``scipy.stats``, raising if unavailable."""
-    try:
-        from scipy import stats  # type: ignore[import-untyped]
-    except ImportError as exc:
-        raise ImportError(
-            "scipy is required for comparison tests. Install it with: pip install scipy"
-        ) from exc
-    return stats
+from qr_sampler.analysis._utils import _require_scipy_stats
 
 
 @dataclass(frozen=True, slots=True)

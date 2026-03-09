@@ -85,8 +85,10 @@ class FallbackEntropySource(EntropySource):
 
     def close(self) -> None:
         """Close both primary and fallback sources."""
-        self._primary.close()
-        self._fallback.close()
+        try:
+            self._primary.close()
+        finally:
+            self._fallback.close()
 
     def health_check(self) -> dict[str, Any]:
         """Return health status for both sources.

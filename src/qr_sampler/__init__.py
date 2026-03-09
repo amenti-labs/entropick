@@ -1,8 +1,8 @@
-"""qr-sampler: Plug any randomness source into LLM token sampling via vLLM.
+"""entropick: Plug any physical randomness source into LLM token sampling.
 
-A vLLM V1 LogitsProcessor plugin that replaces standard token sampling with
-external-entropy-driven selection. Supports quantum random number generators,
-processor timing jitter, and any user-supplied entropy source via gRPC.
+Replaces standard pseudorandom token sampling with external-entropy-driven
+selection. Supports quantum random number generators, OpenEntropy hardware
+noise, processor timing jitter, and any user-supplied entropy source via gRPC.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 try:
     from importlib.metadata import PackageNotFoundError, version
 
-    __version__ = version("qr-sampler")
+    __version__ = version("entropick")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 

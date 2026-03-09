@@ -1,4 +1,4 @@
-"""vLLM V1 LogitsProcessor -- the integration layer for qr-sampler.
+"""vLLM V1 LogitsProcessor -- the integration layer for entropick.
 
 Thin adapter that builds a ``SamplingContext`` for each batch row and
 runs it through the configurable pipeline of ``PipelineStage`` instances.
@@ -132,7 +132,6 @@ class QRSamplerLogitsProcessor:
 
         # --- Pre-allocate tensors ---
         self._onehot_template = self._create_onehot_template()
-        self._cpu_buffer = self._create_cpu_buffer()
 
         # --- Pipeline ---
         self._pipeline: list[PipelineStage] = (
@@ -191,16 +190,6 @@ class QRSamplerLogitsProcessor:
             )
         except (ImportError, OSError):
             return np.full(self._vocab_size, float("-inf"), dtype=np.float32)
-
-    def _create_cpu_buffer(self) -> Any:
-        """Create a pinned-memory CPU buffer for transfers."""
-        if not self._is_pin_memory:
-            return None
-        try:
-            torch = importlib.import_module("torch")
-            return torch.empty(self._vocab_size, dtype=torch.float32, pin_memory=True)
-        except (ImportError, OSError):
-            return None
 
     def is_argmax_invariant(self) -> bool:
         """Return ``False`` -- this processor fundamentally changes token selection."""

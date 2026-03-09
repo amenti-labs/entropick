@@ -1,4 +1,4 @@
-"""Diagnostic logging subsystem for qr-sampler.
+"""Diagnostic logging subsystem for entropick.
 
 Provides immutable per-token sampling records and a configurable logger
 that supports none/summary/full verbosity and in-memory diagnostic mode.

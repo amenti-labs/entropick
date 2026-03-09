@@ -1,7 +1,7 @@
 """Pipeline architecture for composable token sampling.
 
 Provides the ``PipelineStage`` protocol, ``SamplingContext`` state bag,
-``StageRegistry`` for entry-point discovery, and ``run_pipeline`` executor.
+and ``StageRegistry`` for entry-point discovery.
 """
 
 from qr_sampler.pipeline.context import SamplingContext

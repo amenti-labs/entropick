@@ -128,6 +128,20 @@ class TestMirostatPerRequest:
         assert_onehot(result[0])
 
 
+class TestMirostatUnsupportedMode:
+    """Verify Mirostat mode=1 logs a warning."""
+
+    def test_mode_1_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """mirostat_mode=1 should log a warning and produce valid output."""
+        proc = make_processor(mirostat_mode=1)
+        register_request(proc, req_index=0)
+        logits = np.array([SAMPLE_LOGITS])
+        with caplog.at_level("WARNING", logger="qr_sampler"):
+            result = proc.apply(logits)
+        assert_onehot(result[0])
+        assert any("mode 1 is not implemented" in msg for msg in caplog.messages)
+
+
 class TestMirostatEdgeCases:
     """Edge cases for Mirostat."""
 

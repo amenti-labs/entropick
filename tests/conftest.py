@@ -1,4 +1,4 @@
-"""Shared test fixtures for qr-sampler tests."""
+"""Shared test fixtures for entropick tests."""
 
 from __future__ import annotations
 
