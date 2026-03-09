@@ -141,7 +141,7 @@ class QRSamplerLogitsProcessor:
         # --- Per-request state ---
         self._request_states: dict[int, _RequestState] = {}
 
-        logger.debug(
+        logger.info(
             "QRSamplerLogitsProcessor initialized: vocab_size=%d, "
             "entropy_source=%s, pipeline=%d stages",
             self._vocab_size,
@@ -338,6 +338,10 @@ class QRSamplerLogitsProcessor:
         else:
             row = logits[i] if is_numpy else self._to_numpy(logits[i])
 
+        # --- Skip if already one-hot (redundant call from engine) ---
+        if self._is_onehot(row):
+            return
+
         # --- Build context ---
         ctx = SamplingContext(
             row=row,
@@ -399,17 +403,26 @@ class QRSamplerLogitsProcessor:
         self._logger.log_token(record)
 
     @staticmethod
+    def _is_onehot(row: FloatArray) -> bool:
+        """Detect if a row is already one-hot forced (all -inf except one 0.0).
+
+        When the engine calls the logits processor more than once per step,
+        the second call sees the one-hot output from the first. Running
+        the full pipeline again would waste entropy and double latency.
+        """
+        finite_mask = np.isfinite(row)
+        if np.count_nonzero(finite_mask) != 1:
+            return False
+        return float(row[finite_mask][0]) == 0.0
+
+    @staticmethod
     def _to_numpy(tensor: Any) -> FloatArray:
         """Convert a tensor to a numpy array with zero-copy where possible."""
         if isinstance(tensor, np.ndarray):
             return tensor
+        # .cpu() moves GPU tensors (CUDA/MPS) to host memory; no-op on CPU.
         try:
-            if bool(getattr(tensor, "is_cuda", False)):
-                result: FloatArray = tensor.detach().cpu().numpy()
-            elif hasattr(tensor, "is_cpu") and not bool(tensor.is_cpu):
-                result = tensor.detach().cpu().numpy()
-            else:
-                result = tensor.detach().numpy()
+            result: FloatArray = tensor.detach().cpu().numpy()
             return result
         except AttributeError:
             return np.asarray(tensor)

@@ -296,6 +296,46 @@ class TestApplyPipeline:
             assert logits[0, 3] == 0.0
 
 
+class TestOneHotShortCircuit:
+    """Test that redundant calls on already-forced logits are skipped."""
+
+    def test_skips_onehot_input(self) -> None:
+        """apply() is a no-op when logits are already one-hot."""
+        proc = make_processor(diagnostic_mode=True)
+
+        # First call: real processing.
+        logits = np.array([SAMPLE_LOGITS])
+        proc.apply(logits)
+        assert len(proc.sampling_logger.get_diagnostic_data()) == 1
+
+        # Second call on the same (now one-hot) logits: should skip.
+        proc.apply(logits)
+        assert len(proc.sampling_logger.get_diagnostic_data()) == 1  # no new record
+
+    def test_does_not_skip_normal_logits(self) -> None:
+        """apply() processes normal logits that happen to have one finite value."""
+        proc = make_processor(diagnostic_mode=True)
+        # Not one-hot: one finite value but it's not 0.0.
+        logits = np.array([[5.0, 4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -3.0, -4.0]])
+        proc.apply(logits)
+        assert len(proc.sampling_logger.get_diagnostic_data()) == 1
+
+    def test_preserves_onehot_values(self) -> None:
+        """Skipped one-hot logits remain unchanged."""
+        proc = make_processor()
+        logits = np.array([SAMPLE_LOGITS])
+        proc.apply(logits)
+
+        # Capture the one-hot state.
+        selected = int(np.argmax(logits[0]))
+        onehot_copy = logits.copy()
+
+        # Second call should not modify.
+        proc.apply(logits)
+        np.testing.assert_array_equal(logits, onehot_copy)
+        assert logits[0, selected] == 0.0
+
+
 class TestDiagnosticLogging:
     """Test that the processor produces valid diagnostic records."""
 

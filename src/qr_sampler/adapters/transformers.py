@@ -103,11 +103,8 @@ class QRSamplerLogitsProcessorHF(_AdapterBase):
         """Process a single row through the pipeline and force one-hot."""
         t_start_ns = time.perf_counter_ns()
 
-        # Convert to numpy (zero-copy if CPU).
-        if row_tensor.is_cuda:
-            row_np = row_tensor.detach().cpu().numpy()
-        else:
-            row_np = row_tensor.detach().numpy()
+        # .cpu() moves GPU tensors (CUDA/MPS) to host memory; no-op on CPU.
+        row_np = row_tensor.detach().cpu().numpy()
 
         ctx = self._build_context(row_np, components)
         _run_pipeline_and_log(ctx, components, t_start_ns)

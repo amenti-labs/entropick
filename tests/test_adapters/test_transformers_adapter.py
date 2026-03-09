@@ -45,6 +45,10 @@ class MockTensor:
         """Return self (no autograd in mock)."""
         return self
 
+    def cpu(self) -> MockTensor:
+        """Return self (already on CPU in mock)."""
+        return self
+
     def numpy(self) -> np.ndarray[Any, np.dtype[np.floating[Any]]]:
         """Return underlying numpy array."""
         return self._data
