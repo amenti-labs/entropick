@@ -7,14 +7,12 @@ formats while delegating all sampling logic to the shared pipeline.
 Available adapters:
     - ``transformers``: Hugging Face Transformers ``LogitsProcessor``
     - ``llamacpp``: llama-cpp-python custom sampler callback
-    - ``sglang``: SGLang custom logit processor
 """
 
 from __future__ import annotations
 
 __all__ = [
     "QRSamplerCallback",
-    "QRSamplerCustomLogitProcessor",
     "QRSamplerLogitsProcessorHF",
 ]
 
@@ -39,8 +37,4 @@ def __getattr__(name: str) -> type:
         from qr_sampler.adapters.llamacpp import QRSamplerCallback
 
         return QRSamplerCallback
-    if name == "QRSamplerCustomLogitProcessor":
-        from qr_sampler.adapters.sglang import QRSamplerCustomLogitProcessor
-
-        return QRSamplerCustomLogitProcessor
     raise AttributeError(f"module 'qr_sampler.adapters' has no attribute {name!r}")

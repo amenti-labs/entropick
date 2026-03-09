@@ -4,7 +4,7 @@
 
 `entropick` (package: `qr_sampler`) is a vLLM V1 LogitsProcessor plugin that replaces standard token sampling with external-entropy-driven selection. It fetches random bytes from any entropy source (QRNGs via gRPC, OpenEntropy hardware noise, OS randomness, CPU timing jitter), amplifies the signal into a uniform float via z-score statistics, and uses that float to select a token from a probability-ordered CDF.
 
-This is a **pure plugin** -- it does not modify vLLM source code. It registers via the `vllm.logits_processors` entry point in `pyproject.toml`. It also provides adapters for Hugging Face Transformers, llama.cpp, and SGLang. The primary use case is consciousness-research: studying whether conscious intent can influence quantum-random processes in LLM token selection.
+This is a **pure plugin** -- it does not modify vLLM source code. It registers via the `vllm.logits_processors` entry point in `pyproject.toml`. It also provides adapters for Hugging Face Transformers and llama.cpp. The primary use case is consciousness-research: studying whether conscious intent can influence quantum-random processes in LLM token selection.
 
 ## Commands
 
@@ -107,7 +107,6 @@ src/qr_sampler/
 |   +-- _base.py                   # AdapterComponents, _AdapterBase, _run_pipeline_and_log, _init_stage_state
 |   +-- transformers.py            # QRSamplerLogitsProcessorHF: Hugging Face model.generate() adapter
 |   +-- llamacpp.py                # QRSamplerCallback: llama-cpp-python callback adapter
-|   +-- sglang.py                  # QRSamplerCustomLogitProcessor: SGLang custom logit processor adapter
 +-- proto/
 |   +-- __init__.py
 |   +-- entropy_service.proto      # gRPC proto: GetEntropy (unary) + StreamEntropy (bidi)
@@ -149,7 +148,7 @@ tests/
 |   +-- test_statistics.py         # Statistical test battery (requires scipy)
 |   +-- test_compare.py            # Two-sample comparison tests (requires scipy)
 +-- test_adapters/
-|   +-- test_transformers_adapter.py # HF adapter + SGLang + llama-cpp tests with mock tensors
+|   +-- test_transformers_adapter.py # HF adapter + llama-cpp tests with mock tensors
 +-- test_statistical_properties.py # KS-test uniformity, bias detection, EDT monotonicity (requires scipy)
 +-- test_amplification/
 |   +-- test_zscore.py             # Known values, SEM derivation, edge cases, frozen immutability

@@ -386,96 +386,6 @@ class TestClose:
         processor.close()  # Idempotent.
 
 
-class TestSGLangAdapter:
-    """Test the SGLang adapter using MockTensor (torch-like interface)."""
-
-    def test_basic_processing(self) -> None:
-        """SGLang adapter processes mock tensor and produces one-hot output."""
-        from qr_sampler.adapters.sglang import QRSamplerCustomLogitProcessor
-
-        config = _make_config()
-        processor = QRSamplerCustomLogitProcessor(config=config, vocab_size=10)
-
-        scores = MockTensor(np.array([[5.0, 4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -3.0, -4.0]]))
-
-        import sys
-
-        mock_torch = MagicMock()
-        original_torch = sys.modules.get("torch")
-        sys.modules["torch"] = mock_torch
-        try:
-            result = processor(scores)
-        finally:
-            if original_torch is not None:
-                sys.modules["torch"] = original_torch
-            else:
-                sys.modules.pop("torch", None)
-
-        assert result is scores
-        row = result._data[0]
-        assert np.sum(row == 0.0) == 1
-        assert np.sum(np.isneginf(row)) == 9
-
-    def test_config_override(self) -> None:
-        """SGLang adapter applies config overrides via kwargs."""
-        from qr_sampler.adapters.sglang import QRSamplerCustomLogitProcessor
-
-        config = _make_config()
-        processor = QRSamplerCustomLogitProcessor(config=config, vocab_size=10, top_k=1)
-
-        scores = MockTensor(np.array([[5.0, 4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -3.0, -4.0]]))
-
-        import sys
-
-        mock_torch = MagicMock()
-        original_torch = sys.modules.get("torch")
-        sys.modules["torch"] = mock_torch
-        try:
-            processor(scores)
-        finally:
-            if original_torch is not None:
-                sys.modules["torch"] = original_torch
-            else:
-                sys.modules.pop("torch", None)
-
-        # With top_k=1, token 0 (highest logit) should be selected.
-        assert scores._data[0, 0] == 0.0
-
-    def test_diagnostic_records(self) -> None:
-        """SGLang adapter produces diagnostic records."""
-        from qr_sampler.adapters.sglang import QRSamplerCustomLogitProcessor
-
-        config = _make_config(diagnostic_mode=True)
-        processor = QRSamplerCustomLogitProcessor(config=config, vocab_size=10)
-
-        scores = MockTensor(np.array([[5.0, 4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -3.0, -4.0]]))
-
-        import sys
-
-        mock_torch = MagicMock()
-        original_torch = sys.modules.get("torch")
-        sys.modules["torch"] = mock_torch
-        try:
-            processor(scores)
-        finally:
-            if original_torch is not None:
-                sys.modules["torch"] = original_torch
-            else:
-                sys.modules.pop("torch", None)
-
-        records = processor.sampling_logger.get_diagnostic_data()
-        assert len(records) == 1
-        assert records[0].token_id >= 0
-
-    def test_close(self) -> None:
-        """SGLang adapter close works correctly."""
-        from qr_sampler.adapters.sglang import QRSamplerCustomLogitProcessor
-
-        config = _make_config()
-        processor = QRSamplerCustomLogitProcessor(config=config)
-        processor.close()  # Before init -- no-op.
-
-
 class TestLlamaCppAdapter:
     """Test the llama-cpp-python adapter."""
 
@@ -552,15 +462,6 @@ class TestAdapterImports:
         from qr_sampler.adapters.llamacpp import QRSamplerCallback as Direct
 
         assert QRSamplerCallback is Direct
-
-    def test_lazy_import_sglang(self) -> None:
-        """Lazy import of QRSamplerCustomLogitProcessor works."""
-        from qr_sampler.adapters import QRSamplerCustomLogitProcessor
-        from qr_sampler.adapters.sglang import (
-            QRSamplerCustomLogitProcessor as Direct,
-        )
-
-        assert QRSamplerCustomLogitProcessor is Direct
 
     def test_unknown_attr_raises(self) -> None:
         """Accessing unknown attribute on adapters package raises AttributeError."""

@@ -1,1 +1,1 @@
-"""Tests for framework adapters (Transformers, llama-cpp-python, SGLang)."""
+"""Tests for framework adapters (Transformers, llama-cpp-python)."""

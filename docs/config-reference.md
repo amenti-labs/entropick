@@ -2,7 +2,7 @@
 
 This is the exhaustive configuration matrix for entropick.
 
-If you are new to the repo, start with the shorter guidance in [README.md](../README.md). That file covers the normal user path. This document is for the full variable list.
+If you are new to the repo, start with [README.md](../README.md) and [getting-started.md](getting-started.md). Those documents cover the normal user path. This document is for the full variable list.
 
 All configuration uses the `QR_` environment variable prefix. Per-request overrides use `qr_` in `extra_args`.
 

@@ -128,8 +128,7 @@ requests:
 - Circuit breaker thresholds
 - API key authentication
 
-See the [configuration reference](../../README.md#configuration-reference) in
-the main README for the full list.
+See the [configuration reference](../../docs/config-reference.md) for the full list.
 
 ## Disabling the filter
 

@@ -1,0 +1,9 @@
+entropick
+Copyright 2025-2026 entropick contributors
+
+This project is a fork of Quantum-random-vLLM-sampler (qr-sampler),
+originally created by alchemystack.
+
+  Original project: https://github.com/alchemystack/Quantum-random-vLLM-sampler
+  Original license: Apache License 2.0
+  Copyright 2024 qr-sampler contributors

@@ -12,8 +12,10 @@ containerized.
 Install the dependencies:
 
 ```bash
-pip install openentropy
-pip install -e /path/to/entropick
+pip install entropick vllm openentropy
+# or, from a repo checkout:
+# pip install -e /path/to/entropick
+# pip install vllm openentropy
 ```
 
 Then configure and run:
@@ -103,4 +105,4 @@ If this works, the next sensible comparisons are:
 
 1. Try another OpenEntropy source via `QR_OE_SOURCES`.
 2. Compare against [`urandom/`](../urandom/) or plain system entropy.
-3. Open [docs/config-reference.md](../../docs/config-reference.md) only if you need the advanced knobs.
+3. Open [`config-reference.md`](../../docs/config-reference.md) only if you need the advanced knobs.
