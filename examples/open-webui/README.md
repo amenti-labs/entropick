@@ -93,22 +93,26 @@ need them.
 
 ## How it works
 
-```
-User types message in Open WebUI
-  |
-  +-> Open WebUI sends request to vLLM (/v1/chat/completions)
-  |
-  +-> Filter inlet() runs BEFORE the request reaches vLLM:
-  |     - Reads current Valve values
-  |     - Adds qr_top_k, qr_top_p, qr_temperature_strategy, etc.
-  |       as top-level keys in the request body
-  |
-  +-> vLLM receives the request:
-  |     - Unknown top-level keys become SamplingParams.extra_args
-  |     - entropick's resolve_config() reads qr_* from extra_args
-  |     - Token sampling uses the parameters from the Valves
-  |
-  +-> Response streams back through Open WebUI to the user
+```mermaid
+sequenceDiagram
+    accTitle: Open WebUI filter request flow
+    accDescr: A user message enters Open WebUI, the filter injects qr-prefixed sampling fields before the request reaches vLLM, entropick resolves those extra arguments, and the response streams back to the user.
+
+    participant User
+    participant WebUI as Open WebUI
+    participant Filter as Filter inlet()
+    participant vLLM as vLLM + entropick
+
+    User->>WebUI: Send chat message
+    WebUI->>Filter: Run before forwarding request
+    Filter->>Filter: Read Valve values
+    Filter->>Filter: Add qr_top_k, qr_top_p, qr_temperature_strategy, and related qr_* fields
+    Filter->>vLLM: POST /v1/chat/completions
+    vLLM->>vLLM: Unknown top-level keys become SamplingParams.extra_args
+    vLLM->>vLLM: resolve_config() reads qr_* from extra_args
+    vLLM->>vLLM: Token sampling uses Valve-derived parameters
+    vLLM-->>WebUI: Stream response
+    WebUI-->>User: Render assistant output
 ```
 
 Infrastructure settings (gRPC server address, fallback mode, OpenEntropy

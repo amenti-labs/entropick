@@ -6,44 +6,52 @@ entropick intercepts token selection after logits are computed, fetches entropy 
 
 With default settings, only three stages do real work:
 
-```text
-Logits from the model
-  |
-  |- Temperature ------ Apply temperature scaling (fixed or entropy-dependent)
-  |
-  |- Entropy Fetch ---- Fetch random bytes -> amplify -> uniform u in (0,1)
-  |
-  '- Selection -------- top-k -> softmax -> top-p -> CDF -> pick token
-       '- Force one-hot logits back into the runtime
+```mermaid
+flowchart TD
+    accTitle: Default entropick sampling path
+    accDescr: Logits enter temperature scaling, then external entropy is fetched and amplified into a uniform sample, then token filtering and cumulative selection choose the final token, which is returned to the runtime as one-hot logits.
+
+    logits["Logits from the model"]
+    temp["Temperature<br/>Apply fixed or entropy-dependent scaling"]
+    entropy["Entropy Fetch<br/>Fetch random bytes and amplify to uniform u in (0,1)"]
+    select["Selection<br/>top-k -> softmax -> top-p -> CDF -> pick token"]
+    runtime["Force one-hot logits back into the runtime"]
+
+    logits --> temp --> entropy --> select --> runtime
 ```
 
 ## Full stage pipeline
 
 Stages can be enabled independently. The default path is just the smallest subset.
 
-```text
-  PRE-TEMPERATURE
-    1. Adaptive Injection
-    2. Logit Perturbation
-    3. DRY
-    4. Top-N-Sigma
+```mermaid
+flowchart TD
+    accTitle: Full entropick stage pipeline
+    accDescr: Optional pre-temperature stages feed into the always-on temperature stage, followed by optional post-temperature stages, always-on entropy fetch, optional post-entropy drift, and a mutually exclusive selection mode.
 
-    5. Temperature                  always runs
+    subgraph pre["Pre-Temperature"]
+        ai["1. Adaptive Injection<br/>(optional)"] --> lp["2. Logit Perturbation<br/>(optional)"]
+        lp --> dry["3. DRY<br/>(optional)"]
+        dry --> sigma["4. Top-N-Sigma<br/>(optional)"]
+        sigma --> temp["5. Temperature<br/>(always runs)"]
+    end
 
-  POST-TEMPERATURE
-    6. Temp Modulation
-    7. Min-P
-    8. XTC
+    subgraph posttemp["Post-Temperature"]
+        mod["6. Temp Modulation<br/>(optional)"] --> minp["7. Min-P<br/>(optional)"]
+        minp --> xtc["8. XTC<br/>(optional)"]
+    end
 
-    9. Entropy Fetch                always runs
+    subgraph postentropy["Post-Entropy"]
+        drift["10. Selection Drift<br/>(optional)"]
+    end
 
-  POST-ENTROPY
-   10. Selection Drift
-
-  SELECTION (mutually exclusive)
-   11. Mirostat
-   12. Gumbel Selection
-   13. Selection                    default
+    temp --> mod
+    xtc --> entropy["9. Entropy Fetch<br/>(always runs)"]
+    entropy --> drift
+    drift --> mode{"Selection mode"}
+    mode --> miro["11. Mirostat"]
+    mode --> gumbel["12. Gumbel Selection"]
+    mode --> select["13. Default Selection"]
 ```
 
 Stages 11-13 are mutually exclusive. If Mirostat or Gumbel is enabled, the default CDF selector is skipped.

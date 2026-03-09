@@ -6,16 +6,29 @@ This document is for users treating entropick as a research instrument rather th
 
 The `experiments/` directory contains human-readable presets for common experimental conditions:
 
-```text
-experiments/
-├── baseline.yaml
-├── logit_perturbation.yaml
-├── temp_modulation.yaml
-├── selection_drift.yaml
-├── min_p_filtering.yaml
-├── xtc_quantum.yaml
-├── adaptive_injection.yaml
-└── combined.yaml
+```mermaid
+flowchart TD
+    accTitle: Experiment preset directory map
+    accDescr: The experiments directory contains baseline and mechanism-specific presets plus a combined preset for multi-mechanism runs.
+
+    root["experiments/"]
+    baseline["baseline.yaml"]
+    logit["logit_perturbation.yaml"]
+    temp["temp_modulation.yaml"]
+    drift["selection_drift.yaml"]
+    minp["min_p_filtering.yaml"]
+    xtc["xtc_quantum.yaml"]
+    adaptive["adaptive_injection.yaml"]
+    combined["combined.yaml"]
+
+    root --> baseline
+    root --> logit
+    root --> temp
+    root --> drift
+    root --> minp
+    root --> xtc
+    root --> adaptive
+    root --> combined
 ```
 
 These files are not auto-loaded by entropick. They are reproducible environment bundles.
