@@ -262,7 +262,7 @@ class QRSamplerLogitsProcessor:
             stage_state: dict[str, Any] = {
                 "selection_drift.position": req_config.drift_initial_position,
                 "mirostat.mu": 2.0 * req_config.mirostat_tau,
-                "token_history": [],
+                "history_ids": [],
             }
 
             self._request_states[req_idx] = _RequestState(
@@ -355,7 +355,7 @@ class QRSamplerLogitsProcessor:
 
         # --- Append selected token to history (used by DRY penalty) ---
         if ctx.token_id >= 0:
-            ctx.stage_state.setdefault("token_history", []).append(ctx.token_id)
+            ctx.stage_state.setdefault("history_ids", []).append(ctx.token_id)
 
         # --- Persist stage state back to request state ---
         if state is not None:

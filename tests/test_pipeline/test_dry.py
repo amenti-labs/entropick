@@ -38,7 +38,7 @@ def _make_ctx(
         amplifier=None,  # type: ignore[arg-type]
         temperature_strategy=None,  # type: ignore[arg-type]
         config_hash="test",
-        stage_state={"token_history": token_history},
+        stage_state={"history_ids": token_history},
     )
 
 

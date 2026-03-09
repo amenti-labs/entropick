@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger("qr_sampler")
 
-_TOKEN_HISTORY_KEY = "token_history"
+_HISTORY_IDS_KEY = "history_ids"
 
 
 @StageRegistry.register("dry")
@@ -39,7 +39,7 @@ class DRYPenaltyStage:
             return
 
         # --- Get token history ---
-        history: list[int] = ctx.stage_state.get(_TOKEN_HISTORY_KEY, [])
+        history: list[int] = ctx.stage_state.get(_HISTORY_IDS_KEY, [])
         if not history:
             return
 

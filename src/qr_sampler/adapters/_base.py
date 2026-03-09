@@ -198,7 +198,7 @@ def _init_stage_state(config: QRSamplerConfig) -> dict[str, Any]:
     return {
         "selection_drift.position": config.drift_initial_position,
         "mirostat.mu": 2.0 * config.mirostat_tau,
-        "token_history": [],
+        "history_ids": [],
     }
 
 
@@ -220,7 +220,7 @@ def _run_pipeline_and_log(
         stage(ctx)
 
     if ctx.token_id >= 0:
-        ctx.stage_state.setdefault("token_history", []).append(ctx.token_id)
+        ctx.stage_state.setdefault("history_ids", []).append(ctx.token_id)
 
     t_end_ns = time.perf_counter_ns()
     total_sampling_ms = (t_end_ns - t_start_ns) / 1_000_000.0
