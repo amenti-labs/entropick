@@ -6,6 +6,16 @@ entropick replaces the software PRNG used during token selection with entropy fe
 
 Works with **vLLM** first, with adapters for **Hugging Face Transformers** and **llama.cpp**.
 
+## Primary use case
+
+The main intended setup for this repo is:
+
+- **vLLM**
+- **OpenEntropy running on the host machine**
+- **a Crypta Labs QCICADA QRNG device exposed through OpenEntropy**
+
+If that is your target, start with [`deployments/openentropy/`](deployments/openentropy/). The `urandom` profile is still the fastest proof that the stack works, but it is a demo path, not the primary hardware-backed use case.
+
 ## Who this is for
 
 - Researchers running controlled entropy experiments against LLM token selection.
@@ -21,11 +31,11 @@ Pick the path that matches what you are trying to do:
 | If you want to... | Use this path | Why |
 |-------------------|---------------|-----|
 | Prove the repo works end to end with minimal setup | [`deployments/urandom/`](deployments/urandom/) | Fastest working demo of vLLM + entropick + gRPC entropy |
-| Use machine-local hardware noise directly | [`deployments/openentropy/`](deployments/openentropy/) | Native OpenEntropy setup with no network hop |
+| Use the main target setup: QCICADA via OpenEntropy | [`deployments/openentropy/`](deployments/openentropy/) | Native host setup for machine-local hardware noise, including QCICADA-style OpenEntropy sources |
 | Connect your own entropy server | [`deployments/_template/`](deployments/_template/) | Clean starting point for custom gRPC backends |
 | Run locally without deployment profiles | [`docs/getting-started.md`](docs/getting-started.md) | Step-by-step native setup with repo-level `.env` examples |
 
-If you are new to the repo, start with `deployments/urandom/`.
+If you are new to the repo and your goal is the intended hardware-backed path, start with `deployments/openentropy/`. If you just want to verify the stack quickly, start with `deployments/urandom/`.
 
 No matter which path you choose, the end result is the same:
 
@@ -35,9 +45,21 @@ No matter which path you choose, the end result is the same:
 
 ## Quick start
 
+### Main path: QCICADA/OpenEntropy on the host
+
+Use this when the goal is to run entropick the way the repo is primarily intended to be used: vLLM on the host, OpenEntropy on the host, and a QCICADA device feeding entropy through OpenEntropy.
+
+```bash
+cd deployments/openentropy
+cp .env.example .env
+./run-local.sh
+```
+
+See [`deployments/openentropy/README.md`](deployments/openentropy/README.md) for OpenEntropy-specific setup notes and source selection.
+
 ### Fastest working path: Docker + `urandom`
 
-If you just want to see the whole stack working, use the `urandom` deployment profile first.
+If you just want to see the whole stack working before you move to real hardware, use the `urandom` deployment profile first.
 
 ```bash
 cd deployments/urandom
